@@ -64,7 +64,7 @@ JiTTest/
 │   ├── ExecutionResult.cs          # Pass/fail on original + mutated
 │   └── AssessedCatch.cs            # Final catch with confidence
 ├── LLM/
-│   ├── OllamaClientFactory.cs      # Creates IChatClient for Ollama
+│   ├── LlmClientFactory.cs         # Creates IChatClient for Ollama or GitHub Models
 │   └── PromptTemplates.cs          # All prompt templates (intent, mutant, test, assess)
 ├── Compilation/
 │   └── RoslynCompiler.cs           # In-memory C# compilation + error extraction

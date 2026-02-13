@@ -71,7 +71,7 @@ public class PipelineOrchestrator(JiTTestConfig config)
         // ── Stage 2: Infer intent ────────────────────────────────────
         stageSw = Stopwatch.StartNew();
         PrintStage("Stage 2/6", "Inferring change intent...");
-        var chatClient = OllamaClientFactory.Create(config);
+        var chatClient = LlmClientFactory.Create(config);
         var intentInferrer = new IntentInferrer(chatClient, config);
         var intent = await intentInferrer.InferAsync(changeSet);
 

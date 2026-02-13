@@ -12,15 +12,25 @@ Inspired by [Meta's Catching JiTTest research](https://engineering.fb.com/2026/0
 - ✅ **Self-correcting test generation** with compiler feedback
 - 🎯 **False positive filtering** with LLM-based assessment
 - 📊 **Console and markdown reporting**
-- 🏠 **100% local** — runs on Ollama, no cloud dependencies
+- 🏠 **Local or cloud** — runs on Ollama (local) or GitHub Models (cloud)
 
 ## Prerequisites
+
+### Option 1: Local Ollama (Recommended for Development)
 
 1. **.NET 10.0 SDK** or later
 2. **Ollama** running locally with the model:
    ```bash
    ollama pull qwen2.5-coder:32b-instruct-q4_K_M
    ```
+
+### Option 2: GitHub Models (Cloud-based)
+
+1. **.NET 10.0 SDK** or later
+2. **GitHub Personal Access Token** with appropriate permissions
+   - Generate at: https://github.com/settings/tokens
+   - Set as environment variable: `export GITHUB_TOKEN="your_token_here"`
+   - Or configure in `jittest-config.json` (see Configuration section)
 
 ## Installation
 
@@ -65,6 +75,8 @@ jittest --diff-source uncommitted --dry-run
 
 Create a `jittest-config.json` in your repository root:
 
+#### For Local Ollama:
+
 ```json
 {
   "jittest-config": {
@@ -87,6 +99,38 @@ Create a `jittest-config.json` in your repository root:
   }
 }
 ```
+
+#### For GitHub Models:
+
+```json
+{
+  "jittest-config": {
+    "llm-endpoint": "https://models.github.ai/inference/chat/completions",
+    "github-token": "${GITHUB_TOKEN}",
+    "model": "gpt-4o",
+    "diff-source": "uncommitted",
+    "mutate-targets": [
+      "**/*.cs"
+    ],
+    "exclude": [
+      "**/Program.cs",
+      "**/obj/**",
+      "**/bin/**"
+    ],
+    "max-mutants-per-change": 5,
+    "max-retries": 2,
+    "confidence-threshold": "MEDIUM",
+    "reporters": ["console"],
+    "temp-directory": ".jittest-temp"
+  }
+}
+```
+
+**Notes:**
+- For GitHub Models, you can omit `"github-token"` from the config file and use the `GITHUB_TOKEN` environment variable instead
+- Available GitHub Models include: `gpt-4o`, `gpt-4o-mini`, `o1-preview`, `o1-mini`, and various open models
+- Check available models at: https://github.com/marketplace/models
+- GitHub Models offers free tier for development and testing
 
 ## How It Works
 

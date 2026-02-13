@@ -53,14 +53,16 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
         Console.WriteLine($"  Repository: {config.RepositoryRoot}");
         Console.WriteLine($"  Diff source: {config.DiffSource}");
         Console.WriteLine($"  Model: {config.Model}");
-        Console.WriteLine($"  Endpoint: {config.OllamaEndpoint}");
+        Console.WriteLine($"  Provider: {LlmClientFactory.GetProviderName(config)}");
+        Console.WriteLine($"  Endpoint: {config.LlmEndpoint ?? config.OllamaEndpoint}");
         Console.ResetColor();
     }
 
-    // Health check Ollama
-    Console.Write("Checking Ollama connectivity... ");
-    var chatClient = OllamaClientFactory.Create(config);
-    if (await OllamaClientFactory.HealthCheckAsync(config))
+    // Health check LLM provider
+    var providerName = LlmClientFactory.GetProviderName(config);
+    Console.Write($"Checking {providerName} connectivity... ");
+    var chatClient = LlmClientFactory.Create(config);
+    if (await LlmClientFactory.HealthCheckAsync(config))
     {
         Console.ForegroundColor = ConsoleColor.Green;
         Console.WriteLine("OK");
@@ -71,8 +73,17 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
         Console.ForegroundColor = ConsoleColor.Red;
         Console.WriteLine("FAILED");
         Console.ResetColor();
-        Console.Error.WriteLine($"Cannot reach Ollama at {config.OllamaEndpoint} or model '{config.Model}' is not available.");
-        Console.Error.WriteLine("Run: ollama pull " + config.Model);
+        
+        if (providerName == "GitHub Models")
+        {
+            Console.Error.WriteLine($"Cannot reach GitHub Models endpoint or model '{config.Model}' is not available.");
+            Console.Error.WriteLine("Ensure you have a valid GitHub token set via 'github-token' in config or GITHUB_TOKEN environment variable.");
+        }
+        else
+        {
+            Console.Error.WriteLine($"Cannot reach Ollama at {config.LlmEndpoint ?? config.OllamaEndpoint} or model '{config.Model}' is not available.");
+            Console.Error.WriteLine("Run: ollama pull " + config.Model);
+        }
         Environment.ExitCode = 2;
         return;
     }

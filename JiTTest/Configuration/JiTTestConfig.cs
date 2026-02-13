@@ -9,7 +9,13 @@ namespace JiTTest.Configuration;
 public class JiTTestConfig
 {
     [JsonPropertyName("ollama-endpoint")]
-    public string OllamaEndpoint { get; set; } = default!;
+    public string? OllamaEndpoint { get; set; }
+
+    [JsonPropertyName("llm-endpoint")]
+    public string? LlmEndpoint { get; set; }
+
+    [JsonPropertyName("github-token")]
+    public string? GitHubToken { get; set; }
 
     [JsonPropertyName("model")]
     public string Model { get; set; } = default!;

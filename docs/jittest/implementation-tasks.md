@@ -58,10 +58,11 @@
 
 ## Phase 2: LLM Integration
 
-### Task 2.1: Ollama client factory
+### Task 2.1: LLM client factory
 
-- Implement `OllamaClientFactory.cs`
-- Create `OpenAIClient` with Ollama endpoint, wrap as `IChatClient`
+- Implement `LlmClientFactory.cs`
+- Create `OpenAIClient` with configured endpoint (Ollama or GitHub Models), wrap as `IChatClient`
+- Support authentication for GitHub Models via token
 - Include health check: verify model is available before pipeline starts
 - **Acceptance**: Can send a test prompt via `IChatClient` and receive a response
 

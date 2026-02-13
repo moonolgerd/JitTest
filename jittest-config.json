@@ -1,7 +1,16 @@
 {
   "jittest-config": {
+    // ── Local Ollama Configuration ──
+    // Use this for local, offline development with Ollama
     "ollama-endpoint": "http://localhost:11434/v1",
     "model": "qwen3-coder:30b",
+    
+    // ── GitHub Models Configuration (Alternative) ──
+    // Uncomment these lines and comment out ollama-endpoint above to use GitHub Models
+    // "llm-endpoint": "https://models.github.ai/inference/chat/completions",
+    // "github-token": "${GITHUB_TOKEN}",  // or set GITHUB_TOKEN env var
+    // "model": "gpt-4o",
+    
     "diff-source": "uncommitted",
     "mutate-targets": [
       "**/*.cs"
