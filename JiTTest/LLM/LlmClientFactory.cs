@@ -21,9 +21,12 @@ public static class LlmClientFactory
         var endpoint = GetEndpoint(config);
         var apiKey = GetApiKey(config, endpoint);
 
+        // OpenAI SDK adds /chat/completions automatically, so strip it if present
+        var baseEndpoint = StripChatCompletionsPath(endpoint);
+
         var client = new OpenAIClient(
             new ApiKeyCredential(apiKey),
-            new OpenAIClientOptions { Endpoint = new Uri(endpoint) }
+            new OpenAIClientOptions { Endpoint = new Uri(baseEndpoint) }
         );
 
         return client.GetChatClient(config.Model).AsIChatClient();
@@ -76,7 +79,22 @@ public static class LlmClientFactory
 
     private static bool IsGitHubModels(string endpoint)
     {
-        return endpoint.Contains("github.ai", StringComparison.OrdinalIgnoreCase);
+        return endpoint.Contains("models.github.ai", StringComparison.OrdinalIgnoreCase) ||
+               endpoint.Contains("inference.ai.azure.com", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Strip /chat/completions from endpoint if present.
+    /// OpenAI SDK adds this path automatically.
+    /// </summary>
+    private static string StripChatCompletionsPath(string endpoint)
+    {
+        var trimmed = endpoint.TrimEnd('/');
+        if (trimmed.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase))
+        {
+            return trimmed.Substring(0, trimmed.Length - "/chat/completions".Length);
+        }
+        return endpoint;
     }
 
     private static async Task<bool> HealthCheckGitHubModelsAsync(JiTTestConfig config, string endpoint)
@@ -90,9 +108,23 @@ public static class LlmClientFactory
                 return false;
 
             http.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
+            http.DefaultRequestHeaders.Add("User-Agent", "JitTest/1.0");
+            http.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
+            
+            // Only add api-version for Azure endpoints
+            if (endpoint.Contains("inference.ai.azure.com", StringComparison.OrdinalIgnoreCase))
+            {
+                http.DefaultRequestHeaders.Add("api-version", "2024-05-01-preview");
+            }
             
             // Ensure endpoint ends with /chat/completions
             var testEndpoint = NormalizeGitHubModelsEndpoint(endpoint);
+            
+            if (config.Verbose)
+            {
+                Console.Error.WriteLine($"[Debug] Testing endpoint: {testEndpoint}");
+                Console.Error.WriteLine($"[Debug] Using token: {token.Substring(0, Math.Min(20, token.Length))}...");
+            }
                 
             // Send a minimal test request
             var testBody = System.Text.Json.JsonSerializer.Serialize(new
@@ -105,7 +137,19 @@ public static class LlmClientFactory
             var content = new StringContent(testBody, System.Text.Encoding.UTF8, "application/json");
             var response = await http.PostAsync(testEndpoint, content);
             
+            if (!response.IsSuccessStatusCode && config.Verbose)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync();
+                Console.Error.WriteLine($"[Debug] GitHub Models health check failed: {response.StatusCode}");
+                Console.Error.WriteLine($"[Debug] Response: {errorBody}");
+            }
+            
             return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex) when (config.Verbose)
+        {
+            Console.Error.WriteLine($"[Debug] GitHub Models health check exception: {ex.Message}");
+            return false;
         }
         catch
         {

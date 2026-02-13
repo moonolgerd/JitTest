@@ -1,7 +1,7 @@
 {
   "jittest-config": {
     "llm-endpoint": "https://models.github.ai/inference/chat/completions",
-    "model": "gpt-4o",
+    "model": "openai/gpt-4o",
     "diff-source": "uncommitted",
     "mutate-targets": [
       "**/*.cs"

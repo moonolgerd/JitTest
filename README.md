@@ -27,8 +27,9 @@ Inspired by [Meta's Catching JiTTest research](https://engineering.fb.com/2026/0
 ### Option 2: GitHub Models (Cloud-based)
 
 1. **.NET 10.0 SDK** or later
-2. **GitHub Personal Access Token** with appropriate permissions
-   - Generate at: https://github.com/settings/tokens
+2. **GitHub Personal Access Token** with `models:read` permission
+   - Generate a fine-grained PAT at: https://github.com/settings/tokens
+   - Enable the `models:read` permission
    - Set as environment variable: `export GITHUB_TOKEN="your_token_here"`
    - Or configure in `jittest-config.json` (see Configuration section)
 
@@ -106,7 +107,7 @@ Create a `jittest-config.json` in your repository root:
 {
   "jittest-config": {
     "llm-endpoint": "https://models.github.ai/inference/chat/completions",
-    "model": "gpt-4o",
+    "model": "openai/gpt-4o",
     "diff-source": "uncommitted",
     "mutate-targets": [
       "**/*.cs"
@@ -125,12 +126,12 @@ Create a `jittest-config.json` in your repository root:
 }
 ```
 
-**Authentication:** Set `GITHUB_TOKEN` environment variable with your GitHub Personal Access Token. Alternatively, you can add `"github-token": "your_token_here"` to the config file (not recommended for security reasons).
+**Authentication:** Set `GITHUB_TOKEN` environment variable with your GitHub Personal Access Token (must have `models:read` permission). Alternatively, you can add `"github-token": "your_token_here"` to the config file (not recommended for security reasons).
 
 **Notes:**
 - For GitHub Models, you can omit `"github-token"` from the config file and use the `GITHUB_TOKEN` environment variable instead
-- Available GitHub Models include: `gpt-4o`, `gpt-4o-mini`, `o1-preview`, `o1-mini`, and various open models
-- Check available models at: https://github.com/marketplace/models
+- Model names must be in `publisher/model` format (e.g., `openai/gpt-4o`, `openai/gpt-4o-mini`)
+- Available models: Check https://github.com/marketplace/models
 - GitHub Models offers free tier for development and testing
 
 ## How It Works
