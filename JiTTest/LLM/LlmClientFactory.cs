@@ -71,8 +71,7 @@ public static class LlmClientFactory
 
     private static bool IsGitHubModels(string endpoint)
     {
-        return endpoint.Contains("github.ai", StringComparison.OrdinalIgnoreCase) ||
-               endpoint.Contains("models.inference.ai.azure.com", StringComparison.OrdinalIgnoreCase);
+        return endpoint.Contains("github.ai", StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task<bool> HealthCheckGitHubModelsAsync(JiTTestConfig config, string endpoint)
@@ -87,10 +86,8 @@ public static class LlmClientFactory
 
             http.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
             
-            // Try a simple completion request to verify connectivity
-            var testEndpoint = endpoint.TrimEnd('/');
-            if (!testEndpoint.EndsWith("/chat/completions"))
-                testEndpoint += "/chat/completions";
+            // Ensure endpoint ends with /chat/completions
+            var testEndpoint = NormalizeGitHubModelsEndpoint(endpoint);
                 
             // Send a minimal test request
             var testBody = System.Text.Json.JsonSerializer.Serialize(new
@@ -109,6 +106,20 @@ public static class LlmClientFactory
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// Ensure GitHub Models endpoint ends with /chat/completions path.
+    /// GitHub Models expects the full path including /chat/completions.
+    /// </summary>
+    private static string NormalizeGitHubModelsEndpoint(string endpoint)
+    {
+        var normalized = endpoint.TrimEnd('/');
+        if (!normalized.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized += "/chat/completions";
+        }
+        return normalized;
     }
 
     private static async Task<bool> HealthCheckOllamaAsync(string endpoint, string model)
