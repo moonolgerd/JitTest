@@ -32,6 +32,16 @@ public class PipelineOrchestrator(JiTTestConfig config)
 
         Console.WriteLine($"  Found {changeSet.Files.Count} file(s) with changes.");
 
+        // ── Build target project if testing uncommitted changes ──────
+        if (config.DiffSource.ToLowerInvariant() is "uncommitted" or "staged")
+        {
+            Console.Write("  Building target project with changes... ");
+            var buildSuccess = BuildTargetProjects(config.RepositoryRoot, changeSet);
+            Console.ForegroundColor = buildSuccess ? ConsoleColor.Green : ConsoleColor.Yellow;
+            Console.WriteLine(buildSuccess ? "OK" : "FAILED (using existing DLLs)");
+            Console.ResetColor();
+        }
+
         // ── Stage 2: Infer intent ────────────────────────────────────
         PrintStage("Stage 2/6", "Inferring change intent...");
         var chatClient = OllamaClientFactory.Create(config);
@@ -67,7 +77,17 @@ public class PipelineOrchestrator(JiTTestConfig config)
 
         // ── Stage 4: Generate tests ──────────────────────────────────
         PrintStage("Stage 4/6", "Generating catching tests...");
-        var compiler = new RoslynCompiler(Path.Combine(config.RepositoryRoot, "AspireWithDapr.Shared", "bin", "Debug", "net10.0"));
+        
+        // Find build outputs - look for bin/Debug or bin/Release directories
+        var buildOutputPath = FindBuildOutput(config.RepositoryRoot);
+        if (config.Verbose && buildOutputPath != null)
+        {
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine($"  Using build output: {buildOutputPath}");
+            Console.ResetColor();
+        }
+        
+        var compiler = new RoslynCompiler(buildOutputPath);
         var testGenerator = new TestGenerator(chatClient, compiler, config);
         var tests = new List<GeneratedTest>();
 
@@ -140,6 +160,93 @@ public class PipelineOrchestrator(JiTTestConfig config)
         }
 
         return accepted.Count > 0 ? 1 : 0;
+    }
+
+    private static string? FindBuildOutput(string repoRoot)
+    {
+        // Look for bin/Debug or bin/Release directories
+        var candidates = new[]
+        {
+            Path.Combine(repoRoot, "bin", "Debug"),
+            Path.Combine(repoRoot, "bin", "Release")
+        };
+
+        foreach (var candidate in candidates)
+        {
+            if (Directory.Exists(candidate))
+                return candidate;
+        }
+
+        // Search subdirectories for any bin/Debug or bin/Release
+        try
+        {
+            var binDirs = Directory.GetDirectories(repoRoot, "bin", SearchOption.AllDirectories)
+                .Where(d => !d.Contains("\\obj\\"))
+                .ToList();
+
+            foreach (var binDir in binDirs)
+            {
+                var debugDir = Path.Combine(binDir, "Debug");
+                if (Directory.Exists(debugDir))
+                    return debugDir;
+
+                var releaseDir = Path.Combine(binDir, "Release");
+                if (Directory.Exists(releaseDir))
+                    return releaseDir;
+            }
+        }
+        catch
+        {
+            // Ignore errors
+        }
+
+        return null;
+    }
+
+    private static bool BuildTargetProjects(string repoRoot, ChangeSet changeSet)
+    {
+        try
+        {
+            // Find unique project directories from changed files
+            var projectDirs = changeSet.Files
+                .Select(f => Path.GetDirectoryName(Path.Combine(repoRoot, f.FilePath)))
+                .Where(d => !string.IsNullOrEmpty(d))
+                .Distinct()
+                .ToList();
+
+            foreach (var projectDir in projectDirs)
+            {
+                // Look for .csproj file
+                var csprojFiles = Directory.GetFiles(projectDir!, "*.csproj");
+                if (csprojFiles.Length == 0) continue;
+
+                var csproj = csprojFiles[0];
+                
+                // Build the project
+                var startInfo = new ProcessStartInfo
+                {
+                    FileName = "dotnet",
+                    Arguments = $"build \"{csproj}\" --no-restore",
+                    WorkingDirectory = projectDir,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using var process = Process.Start(startInfo);
+                if (process == null) return false;
+
+                process.WaitForExit(30000); // 30 second timeout
+                if (process.ExitCode != 0) return false;
+            }
+
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static void PrintStage(string stage, string message)

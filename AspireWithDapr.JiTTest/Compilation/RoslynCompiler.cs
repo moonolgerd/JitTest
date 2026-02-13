@@ -54,6 +54,11 @@ public class RoslynCompiler
             "System.Linq.dll",
             "System.Threading.Tasks.dll",
             "System.Console.dll",
+            "System.ObjectModel.dll",
+            "System.Runtime.Extensions.dll",
+            "System.ComponentModel.Primitives.dll",
+            "System.TimeZoneInfo.dll",
+            "System.Globalization.dll",
             "netstandard.dll",
             "mscorlib.dll",
             "System.Private.CoreLib.dll"
@@ -68,15 +73,32 @@ public class RoslynCompiler
             }
         }
 
-        // Add xunit.assert if available
+        // Add xunit references
         AddAssemblyByType(refs, typeof(Xunit.Assert));
+        AddAssemblyByType(refs, typeof(Xunit.FactAttribute));
+
+        // Add common System types
+        AddAssemblyByType(refs, typeof(TimeZoneInfo));
+        AddAssemblyByType(refs, typeof(DateTime));
+        AddAssemblyByType(refs, typeof(Uri));
 
         // Add project references from build output
         if (projectBuildOutputPath is not null && Directory.Exists(projectBuildOutputPath))
         {
-            foreach (var dll in Directory.GetFiles(projectBuildOutputPath, "AspireWithDapr.*.dll"))
+            foreach (var dll in Directory.GetFiles(projectBuildOutputPath, "*.dll", SearchOption.AllDirectories))
             {
-                refs.Add(MetadataReference.CreateFromFile(dll));
+                // Skip native runtimes and test assemblies
+                if (dll.Contains("\\runtimes\\") || dll.Contains("\\ref\\") || dll.EndsWith(".Test.dll"))
+                    continue;
+                    
+                try
+                {
+                    refs.Add(MetadataReference.CreateFromFile(dll));
+                }
+                catch
+                {
+                    // Skip problematic DLLs
+                }
             }
         }
 

@@ -2,10 +2,9 @@
   "jittest-config": {
     "ollama-endpoint": "http://localhost:11434/v1",
     "model": "qwen2.5-coder:32b-instruct-q4_K_M",
-    "diff-source": "staged",
+    "diff-source": "uncommitted",
     "mutate-targets": [
-      "**/AspireWithDapr.Shared/**/*.cs",
-      "**/AspireWithDapr.ApiService/**/*.cs"
+      "**/*.cs"
     ],
     "exclude": [
       "**/Program.cs",

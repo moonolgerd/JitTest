@@ -6,11 +6,11 @@ using AspireWithDapr.JiTTest.Pipeline;
 
 // ── CLI definition using System.CommandLine ──────────────────────────
 
-var configOption = new Option<string?>("--config", "Path to jittest-config.json");
-var diffSourceOption = new Option<string?>("--diff-source", "Git diff source: staged, uncommitted, branch:<name>, HEAD~N");
-var modelOption = new Option<string?>("--model", "Ollama model name override");
-var verboseOption = new Option<bool>("--verbose", "Show LLM prompt/response details");
-var dryRunOption = new Option<bool>("--dry-run", "Stop after intent inference (no mutants or tests)");
+var configOption = new Option<string?>("--config") { Description = "Path to jittest-config.json" };
+var diffSourceOption = new Option<string?>("--diff-source") { Description = "Git diff source: staged, uncommitted, branch:<name>, HEAD~N" };
+var modelOption = new Option<string?>("--model") { Description = "Ollama model name override" };
+var verboseOption = new Option<bool>("--verbose") { Description = "Show LLM prompt/response details" };
+var dryRunOption = new Option<bool>("--dry-run") { Description = "Stop after intent inference (no mutants or tests)" };
 
 var rootCommand = new RootCommand("JiTTest — Ephemeral catching tests from LLM-generated mutants")
 {

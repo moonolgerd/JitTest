@@ -180,29 +180,54 @@ public class DiffExtractor
 
     private ChangeSet FilterFiles(ChangeSet changeSet)
     {
-        var includeMatcher = new Matcher();
-        foreach (var pattern in _config.MutateTargets)
-        {
-            includeMatcher.AddInclude(pattern);
-        }
-
-        var excludeMatcher = new Matcher();
-        foreach (var pattern in _config.Exclude)
-        {
-            excludeMatcher.AddInclude(pattern); // Exclude patterns are added as includes to a separate matcher
-        }
-
         var filtered = new ChangeSet { Summary = changeSet.Summary };
 
         foreach (var file in changeSet.Files)
         {
-            // Check inclusion
-            var includeResult = includeMatcher.Match(file.FilePath);
-            if (!includeResult.HasMatches) continue;
+            if (_config.Verbose)
+            {
+                Console.ForegroundColor = ConsoleColor.DarkGray;
+                Console.WriteLine($"  Checking file: {file.FilePath}");
+                Console.ResetColor();
+            }
 
-            // Check exclusion
-            var excludeResult = excludeMatcher.Match(file.FilePath);
-            if (excludeResult.HasMatches) continue;
+            // Normalize path separators for matching
+            var normalizedPath = file.FilePath.Replace("\\", "/");
+
+            // Check if file matches any include pattern
+            var included = _config.MutateTargets.Any(pattern => MatchesGlob(normalizedPath, pattern));
+            
+            if (!included)
+            {
+                if (_config.Verbose)
+                {
+                    Console.ForegroundColor = ConsoleColor.DarkGray;
+                    Console.WriteLine($"    → Excluded (no include match)");
+                    Console.ResetColor();
+                }
+                continue;
+            }
+
+            // Check if file matches any exclude pattern
+            var excluded = _config.Exclude.Any(pattern => MatchesGlob(normalizedPath, pattern));
+            
+            if (excluded)
+            {
+                if (_config.Verbose)
+                {
+                    Console.ForegroundColor = ConsoleColor.DarkGray;
+                    Console.WriteLine($"    → Excluded (matched exclude pattern)");
+                    Console.ResetColor();
+                }
+                continue;
+            }
+
+            if (_config.Verbose)
+            {
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine($"    → Included");
+                Console.ResetColor();
+            }
 
             filtered.Files.Add(file);
         }
@@ -213,5 +238,24 @@ public class DiffExtractor
         }
 
         return filtered;
+    }
+
+    private bool MatchesGlob(string path, string pattern)
+    {
+        // Normalize both to forward slashes
+        path = path.Replace("\\", "/");
+        pattern = pattern.Replace("\\", "/");
+
+        // Convert glob pattern to regex
+        var regexPattern = pattern
+            .Replace(".", "\\.")          // Escape dots
+            .Replace("**", "\x00")        // Placeholder for **
+            .Replace("*", "[^/]*")        // * matches anything except /
+            .Replace("\x00", ".*")        // ** matches everything including /
+            .Replace("?", ".");           // ? matches single character
+
+        regexPattern = "^" + regexPattern + "$";
+
+        return System.Text.RegularExpressions.Regex.IsMatch(path, regexPattern);
     }
 }
