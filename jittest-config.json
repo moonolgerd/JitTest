@@ -8,7 +8,7 @@
     // ── GitHub Models Configuration (Alternative) ──
     // Uncomment these lines and comment out ollama-endpoint above to use GitHub Models
     // "llm-endpoint": "https://models.github.ai/inference/chat/completions",
-    // "github-token": "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",  // Replace with your GitHub token or use GITHUB_TOKEN env var
+    // "github-token": "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",  // Use GITHUB_TOKEN env var (recommended) or replace with your token
     // "model": "gpt-4o",
     
     "diff-source": "uncommitted",

@@ -10,6 +10,8 @@ namespace JiTTest.LLM;
 /// </summary>
 public static class LlmClientFactory
 {
+    private const string DefaultOllamaEndpoint = "http://localhost:11434/v1";
+
     /// <summary>
     /// Build an IChatClient for the configured LLM endpoint and model.
     /// Supports both Ollama (local) and GitHub Models (cloud).
@@ -44,10 +46,13 @@ public static class LlmClientFactory
         return await HealthCheckOllamaAsync(endpoint, config.Model);
     }
 
-    private static string GetEndpoint(JiTTestConfig config)
+    /// <summary>
+    /// Get the effective endpoint from the configuration.
+    /// </summary>
+    public static string GetEndpoint(JiTTestConfig config)
     {
         // Priority: llm-endpoint > ollama-endpoint (for backward compatibility)
-        return config.LlmEndpoint ?? config.OllamaEndpoint ?? "http://localhost:11434/v1";
+        return config.LlmEndpoint ?? config.OllamaEndpoint ?? DefaultOllamaEndpoint;
     }
 
     private static string GetApiKey(JiTTestConfig config, string endpoint)

@@ -62,7 +62,7 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
         Console.WriteLine($"  Diff source: {config.DiffSource}");
         Console.WriteLine($"  Model: {config.Model}");
         Console.WriteLine($"  Provider: {LlmClientFactory.GetProviderName(config)}");
-        Console.WriteLine($"  Endpoint: {config.LlmEndpoint ?? config.OllamaEndpoint}");
+        Console.WriteLine($"  Endpoint: {LlmClientFactory.GetEndpoint(config)}");
         Console.ResetColor();
     }
 
@@ -104,7 +104,7 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
         }
         else
         {
-            Console.Error.WriteLine($"Cannot reach Ollama at {config.LlmEndpoint ?? config.OllamaEndpoint} or model '{config.Model}' is not available.");
+            Console.Error.WriteLine($"Cannot reach Ollama at {LlmClientFactory.GetEndpoint(config)} or model '{config.Model}' is not available.");
             Console.Error.WriteLine("Run: ollama pull " + config.Model);
         }
         Environment.ExitCode = 2;

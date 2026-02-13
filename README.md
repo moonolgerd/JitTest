@@ -106,7 +106,6 @@ Create a `jittest-config.json` in your repository root:
 {
   "jittest-config": {
     "llm-endpoint": "https://models.github.ai/inference/chat/completions",
-    "github-token": "${GITHUB_TOKEN}",
     "model": "gpt-4o",
     "diff-source": "uncommitted",
     "mutate-targets": [
@@ -125,6 +124,8 @@ Create a `jittest-config.json` in your repository root:
   }
 }
 ```
+
+**Authentication:** Set `GITHUB_TOKEN` environment variable with your GitHub Personal Access Token. Alternatively, you can add `"github-token": "your_token_here"` to the config file (not recommended for security reasons).
 
 **Notes:**
 - For GitHub Models, you can omit `"github-token"` from the config file and use the `GITHUB_TOKEN` environment variable instead
