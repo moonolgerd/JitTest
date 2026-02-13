@@ -69,7 +69,6 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
     // Health check LLM provider
     var providerName = LlmClientFactory.GetProviderName(config);
     Console.Write($"Checking {providerName} connectivity... ");
-    
     IChatClient? chatClient = null;
     try
     {
