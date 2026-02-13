@@ -8,8 +8,26 @@ namespace JiTTest.Configuration;
 /// </summary>
 public class JiTTestConfig
 {
+    /// <summary>
+    /// Legacy Ollama endpoint configuration. Kept for backward compatibility.
+    /// New configurations should use LlmEndpoint instead.
+    /// </summary>
     [JsonPropertyName("ollama-endpoint")]
-    public string OllamaEndpoint { get; set; } = default!;
+    public string? OllamaEndpoint { get; set; }
+
+    /// <summary>
+    /// Generic LLM endpoint URL (supports Ollama, GitHub Models, or other OpenAI-compatible APIs).
+    /// Takes priority over OllamaEndpoint if both are specified.
+    /// </summary>
+    [JsonPropertyName("llm-endpoint")]
+    public string? LlmEndpoint { get; set; }
+
+    /// <summary>
+    /// GitHub token for authentication with GitHub Models.
+    /// Can also be set via GITHUB_TOKEN environment variable.
+    /// </summary>
+    [JsonPropertyName("github-token")]
+    public string? GitHubToken { get; set; }
 
     [JsonPropertyName("model")]
     public string Model { get; set; } = default!;

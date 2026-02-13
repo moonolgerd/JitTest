@@ -1,0 +1,21 @@
+{
+  "jittest-config": {
+    "llm-endpoint": "https://models.github.ai/inference/chat/completions",
+    "model": "openai/gpt-4o",
+    "diff-source": "uncommitted",
+    "mutate-targets": [
+      "**/*.cs"
+    ],
+    "exclude": [
+      "**/Program.cs",
+      "**/obj/**",
+      "**/bin/**"
+    ],
+    "max-mutants-per-change": 5,
+    "max-retries": 2,
+    "confidence-threshold": "MEDIUM",
+    "reporters": ["console"],
+    "temp-directory": ".jittest-temp",
+    "max-parallel": 3
+  }
+}
