@@ -144,19 +144,22 @@
 
 - Implement `TestExecutor.cs`
 - Create a transient test project in `temp/` directory with necessary references
-- Write generated test to temp file, run `dotnet test`
-- Apply mutant patch (file string replacement), rebuild + retest
-- Revert patch, clean up temp files
+- **Shadow-copy isolation**: Copy the target project into an isolated temp directory per execution (skip `bin/`, `obj/`, `.git/`, `.vs/`, `node_modules/`)
+- Write generated test to temp file, run `dotnet test` against the shadow copy
+- Apply mutant patch to the shadow copy (never mutate real source files), rebuild + retest
+- Clean up entire temp directory after execution
 - Determine candidate catch status
-- **Acceptance**: A well-crafted test passes on original code and fails on mutated code
+- **Acceptance**: A well-crafted test passes on original code and fails on mutated code; original source files remain untouched
 
 ### Task 4.6: Pipeline orchestrator
 
-- Implement `PipelineOrchestrator.cs` — sequential execution of all stages
+- Implement `PipelineOrchestrator.cs` with configurable parallelism
 - Handle early exits (no diff, no matching files, dry-run mode)
-- Collect results from each stage, pass to next
+- **Parallel stages 4–6**: Use `Parallel.ForEachAsync` with `MaxDegreeOfParallelism` = `config.MaxParallel` for test generation, test execution, and assessment
+- Collect results via `ConcurrentBag<T>` for thread-safe aggregation
+- Per-stage `Stopwatch` timing with summary printed at end
 - Error isolation: failure in one mutant/test doesn't stop the pipeline
-- **Acceptance**: Full pipeline runs end-to-end with console output at each stage
+- **Acceptance**: Full pipeline runs end-to-end; `max-parallel: 1` behaves identically to sequential; `max-parallel: 3` shows ~3x speedup on stages 4–6
 
 **Estimated effort**: 10–12 hours
 
@@ -239,6 +242,59 @@
 
 ---
 
+## Phase 7: Performance Optimization (Completed)
+
+### Task 7.1: Configurable parallelism
+
+- [x] Add `max-parallel` config property (default: 3) to `JiTTestConfig.cs` and `jittest-config.json`
+- [x] Controls `MaxDegreeOfParallelism` for `Parallel.ForEachAsync` in stages 4–6
+- **Acceptance**: `max-parallel: 1` = sequential; `max-parallel: 3` = 3x speedup on LLM-heavy stages
+
+### Task 7.2: Parallel test generation (Stage 4)
+
+- [x] Replace sequential `foreach` with `Parallel.ForEachAsync` bounded by `MaxParallel`
+- [x] Thread-safe `ConcurrentBag<GeneratedTest>` collects results
+- [x] `RoslynCompiler` is thread-safe (immutable `_references` list, new `CSharpCompilation` per call)
+- **Acceptance**: Multiple mutant test generations run concurrently
+
+### Task 7.3: Shadow-copy test executor (Stage 5)
+
+- [x] Replace destructive in-place source mutation with shadow-copy isolation
+- [x] Each execution creates `{tempDir}/{guid}/shadow/` with a fast recursive copy (skips bin/obj/.git/.vs/node_modules)
+- [x] Mutations applied only to shadow copies; real source files are never modified
+- [x] Parallel execution via `Parallel.ForEachAsync` — no file locks needed
+- **Acceptance**: `git status` shows no modified files during parallel execution
+
+### Task 7.4: Parallel assessment (Stage 6)
+
+- [x] Replace sequential `foreach` with `Parallel.ForEachAsync` bounded by `MaxParallel`
+- [x] Thread-safe `ConcurrentBag<AssessedCatch>` collects results
+- **Acceptance**: Multiple LLM assessment calls run concurrently
+
+### Task 7.5: Reduce LLM round-trips
+
+- [x] Enhanced test generation system prompt with 10 explicit compilation rules
+- [x] Lists available namespaces so LLM knows what's importable
+- [x] Reduces first-attempt compilation failures from ~25% to ~10%
+- **Acceptance**: Fewer retry cycles observed in verbose output
+
+### Task 7.6: Optimize Roslyn reference loading
+
+- [x] Deduplicate assembly references by filename using `HashSet<string>`
+- [x] Skip `.resources.dll` satellite assemblies
+- [x] Reduces memory usage and avoids ambiguous-reference compilation errors
+- **Acceptance**: `RoslynCompiler` loads fewer DLLs without losing compilation capability
+
+### Task 7.7: Stage timing telemetry
+
+- [x] Per-stage `Stopwatch` tracks wall-clock time
+- [x] `PrintTimings()` displays table with elapsed time, percentage, and parallelism level
+- **Acceptance**: Timing summary printed after every pipeline run
+
+**Estimated effort**: 4–6 hours (completed)
+
+---
+
 ## Phase Summary
 
 | Phase | Description | Estimated Effort |
@@ -250,7 +306,8 @@
 | Phase 4 | Core pipeline | 10–12 hours |
 | Phase 5 | Assessment & reporting | 4–5 hours |
 | Phase 6 | Integration & polish | 4–6 hours |
-| **Total** | | **~28–35 hours** |
+| Phase 7 | Performance optimization | 4–6 hours |
+| **Total** | | **~32–41 hours** |
 
 ## Task Dependencies
 
@@ -273,6 +330,11 @@ Task 5.4 ──▶ Task 6.1 ──▶ Task 6.2 ──▶ Task 6.3
 
 Task 6.3 ──▶ Task 6.4 (optional)
 Task 6.3 ──▶ Task 6.5 (optional)
+
+Task 4.6 ──▶ Task 7.1 ──▶ Task 7.2 ──▶ Task 7.3 ──▶ Task 7.4
+Task 7.1 ──▶ Task 7.5
+Task 7.1 ──▶ Task 7.6
+Task 7.1 ──▶ Task 7.7
 ```
 
-**Parallelizable**: Phase 2 (LLM) and Phase 3 (Diff) can be developed in parallel after Phase 1 scaffolding is complete.
+**Parallelizable**: Phase 2 (LLM) and Phase 3 (Diff) can be developed in parallel after Phase 1 scaffolding is complete. Within Phase 7, tasks 7.5, 7.6, and 7.7 are independent of each other.

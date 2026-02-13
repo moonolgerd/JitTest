@@ -15,6 +15,7 @@
     "max-retries": 2,
     "confidence-threshold": "MEDIUM",
     "reporters": ["console"],
-    "temp-directory": ".jittest-temp"
+    "temp-directory": ".jittest-temp",
+    "max-parallel": 3
   }
 }

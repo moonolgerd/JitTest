@@ -47,6 +47,9 @@ public class JiTTestConfig
     [JsonPropertyName("temp-directory")]
     public string TempDirectory { get; set; } = ".jittest-temp";
 
+    [JsonPropertyName("max-parallel")]
+    public int MaxParallel { get; set; } = 3;
+
     /// <summary>Absolute path to the git repository root (resolved at runtime).</summary>
     [JsonIgnore]
     public string RepositoryRoot { get; set; } = "";

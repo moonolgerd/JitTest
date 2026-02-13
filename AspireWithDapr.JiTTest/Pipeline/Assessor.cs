@@ -28,7 +28,9 @@ public class Assessor(IChatClient chatClient, JiTTestConfig config)
             return result;
         }
 
-        // Step 2: LLM-based assessment
+        // Step 2: LLM-based annotation (confidence + reasoning only — cannot veto proven catches)
+        // Execution evidence is definitive: test PASSES on original, FAILS on mutant.
+        // The LLM annotates WHY the catch matters, but the accept/reject decision is ours.
         var changeContext = changeSet.Files
             .FirstOrDefault(f => f.FilePath.EndsWith(mutant.TargetFile, StringComparison.OrdinalIgnoreCase))
             ?.FullFileContent ?? "";
@@ -46,30 +48,29 @@ public class Assessor(IChatClient chatClient, JiTTestConfig config)
             {
                 result.Confidence = s_validConfidences.Contains(assessment.Confidence?.ToUpperInvariant() ?? "")
                     ? assessment.Confidence!.ToUpperInvariant()
-                    : "MEDIUM";
+                    : "HIGH";
                 result.LlmAssessment = assessment.Reasoning ?? "";
-                result.IsAccepted = assessment.IsTruePositive && MeetsThreshold(result.Confidence);
             }
             else
             {
-                // Fallback: if LLM response is unparseable, accept with MEDIUM confidence
-                result.Confidence = "MEDIUM";
+                result.Confidence = "HIGH";
                 result.LlmAssessment = text;
-                result.IsAccepted = MeetsThreshold("MEDIUM");
             }
         }
         catch (Exception ex)
         {
-            result.Confidence = "MEDIUM";
-            result.LlmAssessment = $"LLM assessment failed: {ex.Message}";
-            result.IsAccepted = MeetsThreshold("MEDIUM");
+            result.Confidence = "HIGH";
+            result.LlmAssessment = $"LLM annotation failed: {ex.Message}";
         }
+
+        // Execution-proven catches are always accepted (rule-based checks already passed above).
+        // Confidence is informational only — it tells the user how meaningful the assessor thinks it is.
+        result.IsAccepted = true;
 
         if (config.Verbose)
         {
-            var status = result.IsAccepted ? "✅ Accepted" : "❌ Rejected";
-            Console.ForegroundColor = result.IsAccepted ? ConsoleColor.Green : ConsoleColor.Red;
-            Console.WriteLine($"[Assess] {status} [{result.Confidence}] — {result.LlmAssessment[..Math.Min(100, result.LlmAssessment.Length)]}");
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine($"[Assess] ✅ Accepted [{result.Confidence}] — {result.LlmAssessment[..Math.Min(100, result.LlmAssessment.Length)]}");
             Console.ResetColor();
         }
 

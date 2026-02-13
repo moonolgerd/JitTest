@@ -49,7 +49,8 @@ Traditional test suites are static, require manual authoring, and ongoing mainte
 - **FR-5.1**: Execute each generated test against the original code; it must pass.
 - **FR-5.2**: Apply the mutant patch, re-execute; the test must fail.
 - **FR-5.3**: Only tests satisfying both conditions qualify as **candidate catches**.
-- **FR-5.4**: Revert mutant patches after each execution.
+- **FR-5.4**: Source files are never directly mutated — mutations are applied to isolated shadow copies of the target project.
+- **FR-5.5**: Multiple test executions may run in parallel using independent shadow copies, bounded by `max-parallel`.
 
 ### FR-6: False Positive Assessment
 
@@ -69,7 +70,7 @@ Traditional test suites are static, require manual authoring, and ongoing mainte
 
 - **FR-8.1**: Support a `jittest-config.json` file at solution root with all configurable parameters.
 - **FR-8.2**: Allow CLI overrides for all configuration values.
-- **FR-8.3**: Configurable parameters: Ollama endpoint, model name, mutate targets (globs), exclusions, max mutants per change, max retries, diff source, confidence threshold.
+- **FR-8.3**: Configurable parameters: Ollama endpoint, model name, mutate targets (globs), exclusions, max mutants per change, max retries, max parallel, diff source, confidence threshold.
 
 ## Non-Functional Requirements
 
@@ -83,7 +84,9 @@ Traditional test suites are static, require manual authoring, and ongoing mainte
 
 - Full pipeline for a single-file change should complete in < 5 minutes on local hardware.
 - Diff extraction and Roslyn compilation should be < 5 seconds each.
-- LLM calls dominate runtime; optimize by batching where possible.
+- LLM calls dominate runtime; stages 4–6 (test generation, execution, assessment) run with configurable parallelism (`max-parallel`, default: 3) to overlap independent LLM calls and `dotnet test` invocations.
+- Test execution uses shadow-copy isolation (per-execution temp directory copies of the target project), enabling safe parallel `dotnet test` without file-level locking.
+- Stage timing telemetry is printed after each run to support data-driven tuning.
 
 ### NFR-3: Compatibility
 

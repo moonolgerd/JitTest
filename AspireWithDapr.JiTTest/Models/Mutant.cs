@@ -25,4 +25,36 @@ public class Mutant
 
     public int LineStart { get; set; }
     public int LineEnd { get; set; }
+
+    // ── Accessibility annotations (set by MutantGenerator after validation) ──
+
+    /// <summary>Name of the method/property/field containing the mutated code.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? ContainingMember { get; set; }
+
+    /// <summary>True if the containing member is public.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool ContainingMemberIsPublic { get; set; }
+
+    /// <summary>True if the containing member is protected (e.g. BackgroundService.ExecuteAsync).</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool ContainingMemberIsProtected { get; set; }
+
+    /// <summary>True if the containing member is private (no explicit modifier = private in C#).</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool ContainingMemberIsPrivate { get; set; }
+
+    /// <summary>Hint string passed to the test generation prompt about how to test this mutant.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string AccessibilityHint
+    {
+        get
+        {
+            if (ContainingMember is null) return "";
+            if (ContainingMemberIsPublic) return $"The code is inside PUBLIC method '{ContainingMember}' — you can call it directly.";
+            if (ContainingMemberIsProtected) return $"The code is inside PROTECTED method '{ContainingMember}' — you CANNOT call it directly. Test it indirectly via public properties, static data, or by testing the observable side effects.";
+            if (ContainingMemberIsPrivate) return $"The code is inside PRIVATE method '{ContainingMember}' — you CANNOT call it directly. Test it indirectly via a public method that invokes it, or test the data it reads/writes.";
+            return $"The code is inside '{ContainingMember}' — check its accessibility before calling it.";
+        }
+    }
 }

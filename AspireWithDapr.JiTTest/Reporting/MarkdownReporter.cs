@@ -1,5 +1,6 @@
 using System.Text;
 using AspireWithDapr.JiTTest.Models;
+using AspireWithDapr.JiTTest.Pipeline;
 
 namespace AspireWithDapr.JiTTest.Reporting;
 
@@ -8,7 +9,7 @@ namespace AspireWithDapr.JiTTest.Reporting;
 /// </summary>
 public static class MarkdownReporter
 {
-    public static void Report(List<AssessedCatch> catches, TimeSpan elapsed, string outputPath)
+    public static void Report(List<AssessedCatch> catches, TimeSpan elapsed, string outputPath, List<SuspiciousPattern>? suspiciousPatterns = null)
     {
         var sb = new StringBuilder();
         var accepted = catches.Where(c => c.IsAccepted).ToList();
@@ -69,6 +70,28 @@ public static class MarkdownReporter
                     sb.AppendLine();
                     sb.AppendLine($"> {c.LlmAssessment}");
                 }
+            }
+        }
+
+        // Suspicious patterns section
+        if (suspiciousPatterns is { Count: > 0 })
+        {
+            sb.AppendLine();
+            sb.AppendLine("---");
+            sb.AppendLine();
+            sb.AppendLine($"## ⚠ Static Analysis — {suspiciousPatterns.Count} suspicious pattern(s)");
+            sb.AppendLine();
+
+            foreach (var p in suspiciousPatterns)
+            {
+                sb.AppendLine($"### ⚠ [{p.Pattern}] {p.File}:{p.Line}");
+                sb.AppendLine();
+                sb.AppendLine("```csharp");
+                sb.AppendLine(p.Code);
+                sb.AppendLine("```");
+                sb.AppendLine();
+                sb.AppendLine(p.Description);
+                sb.AppendLine();
             }
         }
 

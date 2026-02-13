@@ -27,8 +27,18 @@ public class TestGenerator(IChatClient chatClient, RoslynCompiler compiler, JiTT
         var testCode = LlmResponseParser.ExtractCSharpCode(response.Text ?? "");
         result.TestCode = testCode;
 
-        // Roslyn compilation check
+        // Roslyn compilation check — auto-fix missing usings first
         var (success, errors) = compiler.Compile(testCode);
+        if (!success)
+        {
+            var (fixedCode, wasFixed) = compiler.AutoFixUsings(testCode, errors);
+            if (wasFixed)
+            {
+                testCode = fixedCode;
+                result.TestCode = testCode;
+                (success, errors) = compiler.Compile(testCode);
+            }
+        }
         result.CompilationSuccess = success;
         result.CompilationErrors = [.. errors];
 
@@ -49,9 +59,22 @@ public class TestGenerator(IChatClient chatClient, RoslynCompiler compiler, JiTT
             var fixMessages = PromptTemplates.GetCompilationFixPrompt(testCode, errors);
             response = await chatClient.GetResponseAsync(fixMessages);
             testCode = LlmResponseParser.ExtractCSharpCode(response.Text ?? "");
-            result.TestCode = testCode;
 
-            (success, errors) = compiler.Compile(testCode);
+            // Auto-fix missing usings on retry output too
+            var (retrySuccess, retryErrors) = compiler.Compile(testCode);
+            if (!retrySuccess)
+            {
+                var (fixedCode, wasFixed) = compiler.AutoFixUsings(testCode, retryErrors);
+                if (wasFixed)
+                {
+                    testCode = fixedCode;
+                    (retrySuccess, retryErrors) = compiler.Compile(testCode);
+                }
+            }
+
+            result.TestCode = testCode;
+            success = retrySuccess;
+            errors = retryErrors;
             result.CompilationSuccess = success;
             result.CompilationErrors = [.. errors];
         }

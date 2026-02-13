@@ -1,4 +1,5 @@
 using AspireWithDapr.JiTTest.Models;
+using AspireWithDapr.JiTTest.Pipeline;
 
 namespace AspireWithDapr.JiTTest.Reporting;
 
@@ -7,15 +8,16 @@ namespace AspireWithDapr.JiTTest.Reporting;
 /// </summary>
 public static class ConsoleReporter
 {
-    public static void Report(List<AssessedCatch> catches, TimeSpan elapsed)
+    public static void Report(List<AssessedCatch> catches, TimeSpan elapsed, List<SuspiciousPattern>? suspiciousPatterns = null)
     {
         Console.WriteLine();
         Console.ForegroundColor = ConsoleColor.White;
         Console.WriteLine("═══════════════════════════════════════════════════════");
 
         var accepted = catches.Where(c => c.IsAccepted).ToList();
+        var warningCount = suspiciousPatterns?.Count ?? 0;
 
-        if (accepted.Count == 0)
+        if (accepted.Count == 0 && warningCount == 0)
         {
             Console.ForegroundColor = ConsoleColor.Green;
             Console.WriteLine("  JiTTest Report — No regressions detected ✅");
@@ -26,9 +28,18 @@ public static class ConsoleReporter
             return;
         }
 
-        Console.ForegroundColor = ConsoleColor.Red;
-        var fileCount = accepted.Select(c => c.CandidateCatch.GeneratedTest.ForMutant.TargetFile).Distinct().Count();
-        Console.WriteLine($"  JiTTest Report — {accepted.Count} catch(es) in {fileCount} file(s) 🔴");
+        if (accepted.Count > 0)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            var fileCount = accepted.Select(c => c.CandidateCatch.GeneratedTest.ForMutant.TargetFile).Distinct().Count();
+            Console.WriteLine($"  JiTTest Report — {accepted.Count} catch(es) in {fileCount} file(s) 🔴");
+        }
+        else
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine($"  JiTTest Report — {warningCount} warning(s) ⚠");
+        }
+
         Console.ForegroundColor = ConsoleColor.White;
         Console.WriteLine("═══════════════════════════════════════════════════════");
         Console.ResetColor();
@@ -86,6 +97,35 @@ public static class ConsoleReporter
         Console.ForegroundColor = ConsoleColor.White;
         Console.WriteLine("═══════════════════════════════════════════════════════");
         Console.ResetColor();
+
+        // Show suspicious patterns (static analysis warnings)
+        if (suspiciousPatterns is { Count: > 0 })
+        {
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine($"⚠ Static Analysis — {suspiciousPatterns.Count} suspicious pattern(s) in changed code:");
+            Console.ResetColor();
+
+            foreach (var p in suspiciousPatterns)
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.Write($"\n  ⚠ [{p.Pattern}] ");
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                Console.Write($"{p.File}:{p.Line} ");
+                Console.ResetColor();
+                Console.WriteLine();
+                Console.ForegroundColor = ConsoleColor.DarkGray;
+                Console.WriteLine($"     Code: {p.Code}");
+                Console.ResetColor();
+                Console.WriteLine($"     {p.Description}");
+            }
+
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.White;
+            Console.WriteLine("═══════════════════════════════════════════════════════");
+            Console.ResetColor();
+        }
+
         Console.WriteLine($"\nCompleted in {elapsed.TotalSeconds:F1}s");
     }
 }

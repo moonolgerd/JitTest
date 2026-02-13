@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using AspireWithDapr.JiTTest.Configuration;
 using AspireWithDapr.JiTTest.Compilation;
@@ -10,14 +11,20 @@ namespace AspireWithDapr.JiTTest.Pipeline;
 
 /// <summary>
 /// Orchestrates the full JiTTest pipeline: Diff → Intent → Mutants → Tests → Execute → Assess → Report.
+/// Stages 4-6 run with configurable parallelism (max-parallel) for significantly faster execution.
 /// </summary>
 public class PipelineOrchestrator(JiTTestConfig config)
 {
+    private static readonly Lock s_consoleLock = new();
+    private readonly Dictionary<string, TimeSpan> _stageTimes = [];
+
     public async Task<int> RunAsync()
     {
         var sw = Stopwatch.StartNew();
+        var parallelism = Math.Max(1, config.MaxParallel);
 
         // ── Stage 1: Extract diff ────────────────────────────────────
+        var stageSw = Stopwatch.StartNew();
         PrintStage("Stage 1/6", "Extracting diff...");
         var diffExtractor = new DiffExtractor(config);
         var changeSet = diffExtractor.Extract();
@@ -31,24 +38,45 @@ public class PipelineOrchestrator(JiTTestConfig config)
         }
 
         Console.WriteLine($"  Found {changeSet.Files.Count} file(s) with changes.");
+        _stageTimes["1-Diff"] = stageSw.Elapsed;
+
+        // ── Static Analysis: Detect suspicious patterns in changed code ──
+        var suspiciousPatterns = SuspiciousPatternDetector.Detect(changeSet);
+        if (suspiciousPatterns.Count > 0)
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine($"  \u26a0 {suspiciousPatterns.Count} suspicious pattern(s) detected in changed code:");
+            foreach (var p in suspiciousPatterns)
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.Write($"    \u26a0 [{p.Pattern}] ");
+                Console.ResetColor();
+                Console.WriteLine($"{p.File}:{p.Line} \u2014 {p.Description}");
+            }
+            Console.ResetColor();
+        }
 
         // ── Build target project if testing uncommitted changes ──────
         if (config.DiffSource.ToLowerInvariant() is "uncommitted" or "staged")
         {
+            var buildSw = Stopwatch.StartNew();
             Console.Write("  Building target project with changes... ");
             var buildSuccess = BuildTargetProjects(config.RepositoryRoot, changeSet);
             Console.ForegroundColor = buildSuccess ? ConsoleColor.Green : ConsoleColor.Yellow;
             Console.WriteLine(buildSuccess ? "OK" : "FAILED (using existing DLLs)");
             Console.ResetColor();
+            _stageTimes["Build"] = buildSw.Elapsed;
         }
 
         // ── Stage 2: Infer intent ────────────────────────────────────
+        stageSw = Stopwatch.StartNew();
         PrintStage("Stage 2/6", "Inferring change intent...");
         var chatClient = OllamaClientFactory.Create(config);
         var intentInferrer = new IntentInferrer(chatClient, config);
         var intent = await intentInferrer.InferAsync(changeSet);
 
         Console.WriteLine($"  Intent: {intent.Description[..Math.Min(80, intent.Description.Length)]}");
+        _stageTimes["2-Intent"] = stageSw.Elapsed;
 
         if (config.DryRun)
         {
@@ -61,6 +89,7 @@ public class PipelineOrchestrator(JiTTestConfig config)
         }
 
         // ── Stage 3: Generate mutants ────────────────────────────────
+        stageSw = Stopwatch.StartNew();
         PrintStage("Stage 3/6", "Generating realistic mutants...");
         var mutantGenerator = new MutantGenerator(chatClient, config);
         var mutants = await mutantGenerator.GenerateAsync(intent, changeSet);
@@ -68,131 +97,183 @@ public class PipelineOrchestrator(JiTTestConfig config)
         if (mutants.Count == 0)
         {
             Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine("  No valid mutants generated. Nothing to test.");
+            Console.WriteLine("  No mutants generated. Nothing to test.");
             Console.ResetColor();
+            PrintTimings(sw.Elapsed);
             return 0;
         }
 
-        Console.WriteLine($"  Generated {mutants.Count} mutant(s).");
+        // Filter out untestable mutants (private/protected with no public surface)
+        var testable = mutants.Where(m =>
+        {
+            // Keep mutants where we don't have accessibility info (best-effort)
+            if (m.ContainingMember is null) return true;
+            // Keep public mutants
+            if (m.ContainingMemberIsPublic) return true;
+            // Private methods with no public caller path → skip
+            if (m.ContainingMemberIsPrivate)
+            {
+                if (config.Verbose)
+                {
+                    Console.ForegroundColor = ConsoleColor.DarkYellow;
+                    Console.WriteLine($"  [Filter] Skipping {m.Id}: inside private method '{m.ContainingMember}' — untestable");
+                    Console.ResetColor();
+                }
+                return false;
+            }
+            // Protected methods (e.g. ExecuteAsync) → skip, consistently fails on original
+            if (m.ContainingMemberIsProtected)
+            {
+                if (config.Verbose)
+                {
+                    Console.ForegroundColor = ConsoleColor.DarkYellow;
+                    Console.WriteLine($"  [Filter] Skipping {m.Id}: inside protected method '{m.ContainingMember}' — untestable");
+                    Console.ResetColor();
+                }
+                return false;
+            }
+            return true;
+        }).ToList();
 
-        // ── Stage 4: Generate tests ──────────────────────────────────
-        PrintStage("Stage 4/6", "Generating catching tests...");
+        if (testable.Count < mutants.Count)
+            Console.WriteLine($"  Generated {mutants.Count} mutant(s), {testable.Count} testable (filtered {mutants.Count - testable.Count} private/protected).");
+        else
+            Console.WriteLine($"  Generated {mutants.Count} mutant(s).");
+
+        mutants = testable;
+        _stageTimes["3-Mutants"] = stageSw.Elapsed;
+
+        // ── Stage 4: Generate tests (parallel) ──────────────────────
+        stageSw = Stopwatch.StartNew();
+        PrintStage("Stage 4/6", $"Generating catching tests... (parallelism: {parallelism})");
         
-        // Find build outputs - look for bin/Debug or bin/Release directories
-        var buildOutputPath = FindBuildOutput(config.RepositoryRoot);
-        if (config.Verbose && buildOutputPath != null)
+        // Find build outputs from ALL projects (needed for Dapr, logging, etc. references)
+        var buildOutputPaths = FindAllBuildOutputs(config.RepositoryRoot);
+        if (config.Verbose && buildOutputPaths.Length > 0)
         {
             Console.ForegroundColor = ConsoleColor.DarkGray;
-            Console.WriteLine($"  Using build output: {buildOutputPath}");
+            Console.WriteLine($"  Found {buildOutputPaths.Length} build output path(s) for Roslyn references.");
             Console.ResetColor();
         }
         
-        var compiler = new RoslynCompiler(buildOutputPath);
+        var compiler = new RoslynCompiler(buildOutputPaths, config.Verbose);
         var testGenerator = new TestGenerator(chatClient, compiler, config);
-        var tests = new List<GeneratedTest>();
+        var tests = new ConcurrentBag<GeneratedTest>();
 
-        foreach (var mutant in mutants)
-        {
-            var sourceContent = changeSet.Files
-                .FirstOrDefault(f => f.FilePath.EndsWith(mutant.TargetFile, StringComparison.OrdinalIgnoreCase))
-                ?.FullFileContent ?? "";
+        await Parallel.ForEachAsync(mutants,
+            new ParallelOptions { MaxDegreeOfParallelism = parallelism },
+            async (mutant, ct) =>
+            {
+                var sourceContent = changeSet.Files
+                    .FirstOrDefault(f => f.FilePath.EndsWith(mutant.TargetFile, StringComparison.OrdinalIgnoreCase))
+                    ?.FullFileContent ?? "";
 
-            var test = await testGenerator.GenerateAsync(mutant, sourceContent);
-            tests.Add(test);
-        }
+                var test = await testGenerator.GenerateAsync(mutant, sourceContent);
+                tests.Add(test);
+            });
 
-        var compiledTests = tests.Where(t => t.CompilationSuccess).ToList();
-        Console.WriteLine($"  Generated {tests.Count} test(s), {compiledTests.Count} compiled successfully.");
+        var allTests = tests.ToList();
+        var compiledTests = allTests.Where(t => t.CompilationSuccess).ToList();
+        Console.WriteLine($"  Generated {allTests.Count} test(s), {compiledTests.Count} compiled successfully.");
+        _stageTimes["4-TestGen"] = stageSw.Elapsed;
 
         if (compiledTests.Count == 0)
         {
             Console.ForegroundColor = ConsoleColor.Yellow;
             Console.WriteLine("  No tests compiled successfully. Consider relaxing the model or retries.");
             Console.ResetColor();
+            PrintTimings(sw.Elapsed);
             return 0;
         }
 
-        // ── Stage 5: Execute tests ───────────────────────────────────
-        PrintStage("Stage 5/6", "Executing tests (original → mutated)...");
+        // ── Stage 5: Execute tests (parallel with shadow copies) ────
+        stageSw = Stopwatch.StartNew();
+        PrintStage("Stage 5/6", $"Executing tests (original → mutated)... (parallelism: {parallelism})");
         var testExecutor = new TestExecutor(config);
-        var candidateCatches = new List<ExecutionResult>();
+        var candidateCatches = new ConcurrentBag<ExecutionResult>();
 
-        foreach (var test in compiledTests)
+        await Parallel.ForEachAsync(compiledTests,
+            new ParallelOptions { MaxDegreeOfParallelism = parallelism },
+            async (test, ct) =>
+            {
+                var result = await testExecutor.ExecuteAsync(test);
+                if (result.IsCandidateCatch)
+                    candidateCatches.Add(result);
+            });
+
+        var candidateList = candidateCatches.ToList();
+        Console.WriteLine($"  {candidateList.Count} candidate catch(es) from {compiledTests.Count} test(s).");
+        _stageTimes["5-Exec"] = stageSw.Elapsed;
+
+        if (candidateList.Count == 0)
         {
-            var result = await testExecutor.ExecuteAsync(test);
-            if (result.IsCandidateCatch)
-                candidateCatches.Add(result);
+            ConsoleReporter.Report([], sw.Elapsed, suspiciousPatterns);
+            PrintTimings(sw.Elapsed);
+            return suspiciousPatterns.Count > 0 ? 1 : 0;
         }
 
-        Console.WriteLine($"  {candidateCatches.Count} candidate catch(es) from {compiledTests.Count} test(s).");
-
-        if (candidateCatches.Count == 0)
-        {
-            ConsoleReporter.Report([], sw.Elapsed);
-            return 0;
-        }
-
-        // ── Stage 6: Assess catches ─────────────────────────────────
-        PrintStage("Stage 6/6", "Assessing catches...");
+        // ── Stage 6: Assess catches (parallel) ─────────────────────
+        stageSw = Stopwatch.StartNew();
+        PrintStage("Stage 6/6", $"Assessing catches... (parallelism: {parallelism})");
         var assessor = new Assessor(chatClient, config);
-        var assessed = new List<AssessedCatch>();
+        var assessed = new ConcurrentBag<AssessedCatch>();
 
-        foreach (var candidate in candidateCatches)
-        {
-            var assessment = await assessor.AssessAsync(candidate, changeSet);
-            assessed.Add(assessment);
-        }
+        await Parallel.ForEachAsync(candidateList,
+            new ParallelOptions { MaxDegreeOfParallelism = parallelism },
+            async (candidate, ct) =>
+            {
+                var assessment = await assessor.AssessAsync(candidate, changeSet);
+                assessed.Add(assessment);
+            });
 
-        var accepted = assessed.Where(a => a.IsAccepted).ToList();
-        Console.WriteLine($"  {accepted.Count} accepted catch(es) from {candidateCatches.Count} candidate(s).");
+        var assessedList = assessed.ToList();
+        var accepted = assessedList.Where(a => a.IsAccepted).ToList();
+        Console.WriteLine($"  {accepted.Count} accepted catch(es) from {candidateList.Count} candidate(s).");
+        _stageTimes["6-Assess"] = stageSw.Elapsed;
 
         // ── Reporting ────────────────────────────────────────────────
         sw.Stop();
 
         if (config.Reporters.Contains("console", StringComparer.OrdinalIgnoreCase))
-            ConsoleReporter.Report(assessed, sw.Elapsed);
+            ConsoleReporter.Report(assessedList, sw.Elapsed, suspiciousPatterns);
 
         if (config.Reporters.Contains("markdown", StringComparer.OrdinalIgnoreCase))
         {
             var mdPath = Path.Combine(config.RepositoryRoot, "jittest-report.md");
-            MarkdownReporter.Report(assessed, sw.Elapsed, mdPath);
+            MarkdownReporter.Report(assessedList, sw.Elapsed, mdPath, suspiciousPatterns);
             Console.WriteLine($"\nMarkdown report: {mdPath}");
         }
 
+        PrintTimings(sw.Elapsed);
         return accepted.Count > 0 ? 1 : 0;
     }
 
-    private static string? FindBuildOutput(string repoRoot)
+    /// <summary>
+    /// Find ALL build output directories across the repo so Roslyn has references
+    /// to every project's assemblies (Shared, ApiService, Publisher, etc.).
+    /// </summary>
+    private static string[] FindAllBuildOutputs(string repoRoot)
     {
-        // Look for bin/Debug or bin/Release directories
-        var candidates = new[]
-        {
-            Path.Combine(repoRoot, "bin", "Debug"),
-            Path.Combine(repoRoot, "bin", "Release")
-        };
+        var results = new List<string>();
 
-        foreach (var candidate in candidates)
-        {
-            if (Directory.Exists(candidate))
-                return candidate;
-        }
-
-        // Search subdirectories for any bin/Debug or bin/Release
         try
         {
             var binDirs = Directory.GetDirectories(repoRoot, "bin", SearchOption.AllDirectories)
-                .Where(d => !d.Contains("\\obj\\"))
+                .Where(d => !d.Contains("\\obj\\") && !d.Contains(".JiTTest"))
                 .ToList();
 
             foreach (var binDir in binDirs)
             {
                 var debugDir = Path.Combine(binDir, "Debug");
                 if (Directory.Exists(debugDir))
-                    return debugDir;
+                {
+                    results.Add(debugDir);
+                    continue;
+                }
 
                 var releaseDir = Path.Combine(binDir, "Release");
                 if (Directory.Exists(releaseDir))
-                    return releaseDir;
+                    results.Add(releaseDir);
             }
         }
         catch
@@ -200,7 +281,7 @@ public class PipelineOrchestrator(JiTTestConfig config)
             // Ignore errors
         }
 
-        return null;
+        return [.. results];
     }
 
     private static bool BuildTargetProjects(string repoRoot, ChangeSet changeSet)
@@ -256,5 +337,22 @@ public class PipelineOrchestrator(JiTTestConfig config)
         Console.Write($"[{stage}] ");
         Console.ResetColor();
         Console.WriteLine(message);
+    }
+
+    private void PrintTimings(TimeSpan total)
+    {
+        Console.WriteLine();
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine("── Stage Timings ───────────────────────────────────────");
+        foreach (var (stage, elapsed) in _stageTimes)
+        {
+            var pct = total.TotalMilliseconds > 0
+                ? (elapsed.TotalMilliseconds / total.TotalMilliseconds * 100).ToString("F0")
+                : "0";
+            Console.WriteLine($"  {stage,-14} {elapsed.TotalSeconds,7:F1}s  ({pct}%)");
+        }
+        Console.WriteLine($"  {"Total",-14} {total.TotalSeconds,7:F1}s");
+        Console.WriteLine($"  Parallelism:   {Math.Max(1, config.MaxParallel)}");
+        Console.ResetColor();
     }
 }
