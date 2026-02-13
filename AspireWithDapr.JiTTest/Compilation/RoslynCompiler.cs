@@ -41,6 +41,10 @@ public class RoslynCompiler
         ["Random"] = "using System;",
         ["TimeZoneInfo"] = "using System;",
         ["DateTime"] = "using System;",
+        ["DateTimeOffset"] = "using System;",
+        ["TimeSpan"] = "using System;",
+        ["Guid"] = "using System;",
+        ["Math"] = "using System;",
         ["Task"] = "using System.Threading.Tasks;",
         ["ArgumentNullException"] = "using System;",
         ["ArgumentException"] = "using System;",
@@ -113,6 +117,32 @@ public class RoslynCompiler
                     if (!sourceCode.Contains(usingDirective, StringComparison.OrdinalIgnoreCase))
                         missingUsings.Add(usingDirective);
                 }
+            }
+
+            // CS0122: 'Type.Method()' is inaccessible due to its protection level
+            // Common case: LLM calls ExecuteAsync directly on BackgroundService
+            // Fix: Replace .ExecuteAsync( with .StartAsync(
+            if (error.Contains("CS0122") && error.Contains("ExecuteAsync"))
+            {
+                sourceCode = Regex.Replace(sourceCode,
+                    @"\.ExecuteAsync\s*\(",
+                    ".StartAsync(");
+                codeModified = true;
+            }
+
+            // CS1674: type used in a using statement must implement 'System.IDisposable'
+            // Fix: Remove the 'using' keyword from the variable declaration
+            if (error.Contains("CS1674"))
+            {
+                // Transform: using var x = new Foo(); → var x = new Foo();
+                // Transform: using (var x = new Foo()) { ... } → { var x = new Foo(); ... }
+                sourceCode = Regex.Replace(sourceCode,
+                    @"\busing\s+(var\s+\w+\s*=)",
+                    "$1");
+                sourceCode = Regex.Replace(sourceCode,
+                    @"\busing\s*\((var\s+\w+\s*=.*?)\)\s*\{",
+                    "{ $1;");
+                codeModified = true;
             }
 
             // CS1929: 'string[]' does not contain a definition for 'Contains' and the best

@@ -20,6 +20,12 @@ public static class SuspiciousPatternDetector
 
         foreach (var file in changeSet.Files)
         {
+            // ── Cross-hunk analysis: detect finally block removal ──
+            DetectFinallyRemoval(file, warnings);
+
+            // ── Cross-hunk analysis: detect cleanup/reset code in try without finally ──
+            DetectCleanupNotInFinally(file, warnings);
+
             // Scan hunk after-content (new lines) for suspicious patterns
             foreach (var hunk in file.Hunks)
             {
@@ -119,6 +125,190 @@ public static class SuspiciousPatternDetector
         }
 
         return warnings;
+    }
+
+    /// <summary>
+    /// Detect when a `finally` block was removed in the diff.
+    /// Code that was guaranteed to run (cleanup, state reset, Dispose) will no longer
+    /// execute when exceptions occur — a common source of resource leaks and stuck state.
+    /// </summary>
+    private static void DetectFinallyRemoval(ChangedFile file, List<SuspiciousPattern> warnings)
+    {
+        foreach (var hunk in file.Hunks)
+        {
+            var beforeLines = hunk.BeforeContent?.Split('\n') ?? [];
+            var afterLines = hunk.AfterContent?.Split('\n') ?? [];
+
+            var hadFinally = beforeLines.Any(l => Regex.IsMatch(l, @"\bfinally\b"));
+            var hasFinally = afterLines.Any(l => Regex.IsMatch(l, @"\bfinally\b"));
+
+            if (!hadFinally || hasFinally) continue;
+
+            // Extract what was inside the finally block
+            var finallyBody = ExtractFinallyBody(beforeLines);
+            var bodyDescription = string.IsNullOrWhiteSpace(finallyBody)
+                ? ""
+                : $" The `finally` block contained: `{finallyBody.Trim()}`";
+
+            warnings.Add(new SuspiciousPattern
+            {
+                File = file.FilePath,
+                Line = hunk.NewStart,
+                Code = "finally { ... } block removed",
+                Pattern = "FINALLY_REMOVED",
+                Description = $"A `finally` block was removed from this change.{bodyDescription} " +
+                              "Code in `finally` is guaranteed to run even when exceptions occur. " +
+                              "Without it, cleanup/state-reset may not execute on error paths, " +
+                              "leading to resource leaks, stuck UI state, or unclosed connections."
+            });
+        }
+    }
+
+    /// <summary>
+    /// Detect state-resetting code (= false, = null, = 0, Dispose, Close) inside a try block
+    /// when there is no finally block. This pattern often indicates cleanup code that should
+    /// be in a finally block to ensure it runs on exception paths.
+    /// </summary>
+    private static void DetectCleanupNotInFinally(ChangedFile file, List<SuspiciousPattern> warnings)
+    {
+        // Analyze the full after-content of the file via hunk context
+        foreach (var hunk in file.Hunks)
+        {
+            var afterContent = hunk.AfterContent;
+            if (string.IsNullOrWhiteSpace(afterContent)) continue;
+
+            var lines = afterContent.Split('\n');
+
+            // Look for try-catch blocks that lack a finally block with cleanup/reset code inside try
+            var insideTry = false;
+            var insideCatch = false;
+            var braceDepth = 0;
+            var tryBraceDepth = 0;
+            var hasCatch = false;
+            var hasFinally = false;
+            var resetLines = new List<(int lineIndex, string code)>();
+
+            for (var i = 0; i < lines.Length; i++)
+            {
+                var line = lines[i].Trim();
+
+                // Track try/catch/finally keywords
+                if (Regex.IsMatch(line, @"\btry\b\s*\{?"))
+                {
+                    insideTry = true;
+                    insideCatch = false;
+                    hasCatch = false;
+                    hasFinally = false;
+                    tryBraceDepth = braceDepth;
+                    resetLines.Clear();
+                }
+                else if (Regex.IsMatch(line, @"\bcatch\b"))
+                {
+                    insideTry = false;
+                    insideCatch = true;
+                    hasCatch = true;
+                }
+                else if (Regex.IsMatch(line, @"\bfinally\b"))
+                {
+                    insideTry = false;
+                    insideCatch = false;
+                    hasFinally = true;
+                }
+
+                // Track braces
+                braceDepth += line.Count(c => c == '{') - line.Count(c => c == '}');
+
+                // When we return to the try-block's brace depth, the try-catch-finally is complete
+                if (braceDepth <= tryBraceDepth && (insideTry || insideCatch || hasCatch) && !hasFinally)
+                {
+                    // Report any state-reset code found in the try block without finally
+                    if (hasCatch && resetLines.Count > 0 && !hasFinally)
+                    {
+                        foreach (var (lineIndex, code) in resetLines)
+                        {
+                            var lineNum = hunk.NewStart + lineIndex;
+                            warnings.Add(new SuspiciousPattern
+                            {
+                                File = file.FilePath,
+                                Line = lineNum,
+                                Code = code,
+                                Pattern = "CLEANUP_NOT_IN_FINALLY",
+                                Description = "State-reset or cleanup code is inside a `try` block but there is no `finally` block. " +
+                                              "If an exception occurs, this code will be skipped. " +
+                                              "Consider moving it to a `finally` block to ensure it always executes."
+                            });
+                        }
+                    }
+                    insideTry = false;
+                    insideCatch = false;
+                }
+
+                // Detect state-resetting code inside try block
+                if (insideTry && IsStateResetCode(line))
+                {
+                    resetLines.Add((i, line));
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Check if a line of code looks like state-resetting/cleanup code.
+    /// </summary>
+    private static bool IsStateResetCode(string line)
+    {
+        // Boolean resets: isLoading = false, _isRunning = false, etc.
+        if (Regex.IsMatch(line, @"\b\w+\s*=\s*false\s*;"))
+            return true;
+
+        // Null assignments: result = null, _connection = null
+        if (Regex.IsMatch(line, @"\b\w+\s*=\s*null\s*;"))
+            return true;
+
+        // Zero assignments: count = 0, _retries = 0
+        if (Regex.IsMatch(line, @"\b\w+\s*=\s*0\s*;"))
+            return true;
+
+        // Dispose/Close calls
+        if (Regex.IsMatch(line, @"\.\s*(?:Dispose|Close|Release|Reset)\s*\("))
+            return true;
+
+        return false;
+    }
+
+    /// <summary>
+    /// Extract the body of a finally block from diff lines.
+    /// </summary>
+    private static string ExtractFinallyBody(string[] lines)
+    {
+        var inFinally = false;
+        var depth = 0;
+        var bodyLines = new List<string>();
+
+        foreach (var line in lines)
+        {
+            if (Regex.IsMatch(line, @"\bfinally\b"))
+            {
+                inFinally = true;
+                depth = 0;
+                continue;
+            }
+
+            if (!inFinally) continue;
+
+            depth += line.Count(c => c == '{') - line.Count(c => c == '}');
+
+            var trimmed = line.Trim();
+            if (trimmed != "{" && trimmed != "}" && !string.IsNullOrWhiteSpace(trimmed))
+            {
+                bodyLines.Add(trimmed);
+            }
+
+            if (depth <= 0 && bodyLines.Count > 0)
+                break;
+        }
+
+        return string.Join("; ", bodyLines);
     }
 }
 

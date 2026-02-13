@@ -104,6 +104,18 @@ public class MutantGenerator(IChatClient chatClient, JiTTestConfig config)
         {
             if (string.IsNullOrEmpty(file.FullFileContent)) continue;
 
+            // Handle .razor files specially — @code blocks are private and untestable
+            if (file.FilePath.EndsWith(".razor", StringComparison.OrdinalIgnoreCase))
+            {
+                var lines = new List<string> { $"### {file.FilePath} (Blazor component)" };
+                lines.Add("  ⚠ Blazor @code blocks: ALL methods and fields are PRIVATE (untestable)");
+                lines.Add("  ⚠ @inject services: PRIVATE properties (untestable)");
+                lines.Add("  ✓ References to public types (e.g. SharedCollections.Cities) in the template ARE testable");
+                lines.Add("    → Mutate the PUBLIC .cs files that define the data, NOT the .razor @code block");
+                parts.Add(string.Join("\n", lines));
+                continue;
+            }
+
             try
             {
                 var tree = CSharpSyntaxTree.ParseText(file.FullFileContent);
@@ -174,6 +186,14 @@ public class MutantGenerator(IChatClient chatClient, JiTTestConfig config)
     /// </summary>
     private static void AnnotateAccessibility(Mutant mutant, ChangeSet changeSet)
     {
+        // .razor files: all @code members are private
+        if (mutant.TargetFile.EndsWith(".razor", StringComparison.OrdinalIgnoreCase))
+        {
+            mutant.ContainingMember = "@code";
+            mutant.ContainingMemberIsPrivate = true;
+            return;
+        }
+
         var targetFile = changeSet.Files.FirstOrDefault(f =>
             f.FilePath.Equals(mutant.TargetFile, StringComparison.OrdinalIgnoreCase) ||
             f.FilePath.EndsWith(mutant.TargetFile, StringComparison.OrdinalIgnoreCase));

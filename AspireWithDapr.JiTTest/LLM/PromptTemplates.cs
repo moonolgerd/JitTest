@@ -77,6 +77,15 @@ public static class PromptTemplates
 
                 Aim for a MIX: at least 2 public-target mutants + 1-2 private/protected if relevant.
 
+                ═══ BLAZOR COMPONENTS (.razor files) ═══
+                Blazor @code { } blocks compile to PRIVATE members — they CANNOT be unit tested.
+                @inject properties are also PRIVATE.
+                Do NOT generate mutants targeting code inside @code { } blocks.
+                Instead, mutate the PUBLIC .cs types that the .razor file references
+                (e.g. SharedCollections, WeatherForecast, utility methods).
+                If the ONLY change is inside a .razor @code block with no public surface,
+                generate mutants for the public data types used by the component.
+
                 Respond ONLY with a JSON array of mutants matching this schema:
                 [
                   {
@@ -271,6 +280,11 @@ public static class PromptTemplates
                   Use .ToList().Contains() or .AsEnumerable().Contains() instead.
                 - CS0117 "does not contain a definition for 'X'" → The field/property is private.
                   Do NOT access private static fields.
+                - CS1674 "type used in a using statement must implement IDisposable" → 
+                  Remove the `using` keyword. The type is not disposable.
+                - CS1501 "No overload for method 'Is' takes N arguments" →
+                  NSubstitute `Arg.Is<T>()` takes a single predicate: `Arg.Is<T>(x => condition)`.
+                  Do NOT pass multiple arguments. For exact match use `Arg.Is<T>(value)`.
                 
                 Respond ONLY with the corrected C# code. No markdown fences, no explanation.
                 """),

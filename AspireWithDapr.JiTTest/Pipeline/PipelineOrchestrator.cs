@@ -103,44 +103,41 @@ public class PipelineOrchestrator(JiTTestConfig config)
             return 0;
         }
 
-        // Filter out untestable mutants (private/protected with no public surface)
-        var testable = mutants.Where(m =>
+        // Prioritize testable mutants: public first, then allow some private/protected
+        // Private/protected methods CAN be tested indirectly (e.g. BackgroundService.StartAsync
+        // invokes protected ExecuteAsync), so we don't discard them entirely.
+        var publicMutants = mutants.Where(m =>
+            m.ContainingMember is null || m.ContainingMemberIsPublic).ToList();
+        var nonPublicMutants = mutants.Where(m =>
+            m.ContainingMember is not null && !m.ContainingMemberIsPublic).ToList();
+
+        // Allow up to 2 non-public mutants through (they may be testable indirectly)
+        const int maxNonPublic = 2;
+        var selectedNonPublic = nonPublicMutants.Take(maxNonPublic).ToList();
+
+        if (config.Verbose && nonPublicMutants.Count > 0)
         {
-            // Keep mutants where we don't have accessibility info (best-effort)
-            if (m.ContainingMember is null) return true;
-            // Keep public mutants
-            if (m.ContainingMemberIsPublic) return true;
-            // Private methods with no public caller path → skip
-            if (m.ContainingMemberIsPrivate)
+            foreach (var m in selectedNonPublic)
             {
-                if (config.Verbose)
-                {
-                    Console.ForegroundColor = ConsoleColor.DarkYellow;
-                    Console.WriteLine($"  [Filter] Skipping {m.Id}: inside private method '{m.ContainingMember}' — untestable");
-                    Console.ResetColor();
-                }
-                return false;
+                var vis = m.ContainingMemberIsProtected ? "protected" : "private";
+                Console.ForegroundColor = ConsoleColor.DarkYellow;
+                Console.WriteLine($"  [Filter] Keeping {m.Id}: inside {vis} method '{m.ContainingMember}' — will attempt indirect testing");
+                Console.ResetColor();
             }
-            // Protected methods (e.g. ExecuteAsync) → skip, consistently fails on original
-            if (m.ContainingMemberIsProtected)
+            foreach (var m in nonPublicMutants.Skip(maxNonPublic))
             {
-                if (config.Verbose)
-                {
-                    Console.ForegroundColor = ConsoleColor.DarkYellow;
-                    Console.WriteLine($"  [Filter] Skipping {m.Id}: inside protected method '{m.ContainingMember}' — untestable");
-                    Console.ResetColor();
-                }
-                return false;
+                var vis = m.ContainingMemberIsProtected ? "protected" : "private";
+                Console.ForegroundColor = ConsoleColor.DarkYellow;
+                Console.WriteLine($"  [Filter] Skipping {m.Id}: inside {vis} method '{m.ContainingMember}' — quota reached");
+                Console.ResetColor();
             }
-            return true;
-        }).ToList();
+        }
 
-        if (testable.Count < mutants.Count)
-            Console.WriteLine($"  Generated {mutants.Count} mutant(s), {testable.Count} testable (filtered {mutants.Count - testable.Count} private/protected).");
-        else
-            Console.WriteLine($"  Generated {mutants.Count} mutant(s).");
+        mutants = [.. publicMutants, .. selectedNonPublic];
 
-        mutants = testable;
+        Console.WriteLine($"  {publicMutants.Count} public + {selectedNonPublic.Count} private/protected mutant(s) selected" +
+            (nonPublicMutants.Count > selectedNonPublic.Count ? $" (skipped {nonPublicMutants.Count - selectedNonPublic.Count})" : "") + ".");
+
         _stageTimes["3-Mutants"] = stageSw.Elapsed;
 
         // ── Stage 4: Generate tests (parallel) ──────────────────────
