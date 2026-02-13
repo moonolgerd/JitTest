@@ -1,0 +1,21 @@
+{
+  "jittest-config": {
+    "ollama-endpoint": "http://localhost:11434/v1",
+    "model": "qwen2.5-coder:32b-instruct-q4_K_M",
+    "diff-source": "staged",
+    "mutate-targets": [
+      "**/AspireWithDapr.Shared/**/*.cs",
+      "**/AspireWithDapr.ApiService/**/*.cs"
+    ],
+    "exclude": [
+      "**/Program.cs",
+      "**/obj/**",
+      "**/bin/**"
+    ],
+    "max-mutants-per-change": 5,
+    "max-retries": 2,
+    "confidence-threshold": "MEDIUM",
+    "reporters": ["console"],
+    "temp-directory": ".jittest-temp"
+  }
+}
