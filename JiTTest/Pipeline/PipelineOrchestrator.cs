@@ -204,7 +204,7 @@ public class PipelineOrchestrator(JiTTestConfig config)
 
         if (candidateList.Count == 0)
         {
-            ConsoleReporter.Report([], sw.Elapsed, suspiciousPatterns);
+            ConsoleReporter.Report([], sw.Elapsed, suspiciousPatterns, config.Verbose);
             PrintTimings(sw.Elapsed);
             return suspiciousPatterns.Count > 0 ? 1 : 0;
         }
@@ -232,7 +232,7 @@ public class PipelineOrchestrator(JiTTestConfig config)
         sw.Stop();
 
         if (config.Reporters.Contains("console", StringComparer.OrdinalIgnoreCase))
-            ConsoleReporter.Report(assessedList, sw.Elapsed, suspiciousPatterns);
+            ConsoleReporter.Report(assessedList, sw.Elapsed, suspiciousPatterns, config.Verbose);
 
         if (config.Reporters.Contains("markdown", StringComparer.OrdinalIgnoreCase))
         {

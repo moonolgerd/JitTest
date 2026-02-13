@@ -54,7 +54,7 @@ jittest --diff-source staged
 # Compare against a branch
 jittest --diff-source branch:main
 
-# With verbose output
+# With verbose output (shows full test code and LLM details)
 jittest --diff-source uncommitted --verbose
 
 # Dry run (intent inference only)

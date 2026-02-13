@@ -36,6 +36,7 @@ public class RoslynCompiler
         ["WeatherUtilities"] = "using AspireWithDapr.Shared;",
         ["SharedCollections"] = "using AspireWithDapr.Shared;",
         ["SharedConstants"] = "using AspireWithDapr.Shared;",
+        ["PublisherHostedService"] = "using AspireWithDapr.Publisher;",
         ["CancellationToken"] = "using System.Threading;",
         ["CancellationTokenSource"] = "using System.Threading;",
         ["Random"] = "using System;",
@@ -295,11 +296,11 @@ public class RoslynCompiler
         {
             Console.ForegroundColor = ConsoleColor.DarkGray;
             Console.WriteLine($"  [Roslyn] Loaded {refs.Count} assembly references");
-            var typeRefs = new[] { "NSubstitute", "Logging", "DependencyInjection", "Hosting" };
+            var interestingRefs = new[] { "NSubstitute", "Logging", "DependencyInjection", "Hosting", "Dapr", "AspireWithDapr", "Publisher", "Shared" };
             foreach (var r in refs.OfType<PortableExecutableReference>())
             {
                 var name = Path.GetFileName(r.FilePath ?? "");
-                if (typeRefs.Any(t => name.Contains(t, StringComparison.OrdinalIgnoreCase)))
+                if (interestingRefs.Any(t => name.Contains(t, StringComparison.OrdinalIgnoreCase)))
                     Console.WriteLine($"    ✓ {name}");
             }
             Console.ResetColor();

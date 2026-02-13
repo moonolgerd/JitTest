@@ -8,7 +8,7 @@ namespace AspireWithDapr.JiTTest.Reporting;
 /// </summary>
 public static class ConsoleReporter
 {
-    public static void Report(List<AssessedCatch> catches, TimeSpan elapsed, List<SuspiciousPattern>? suspiciousPatterns = null)
+    public static void Report(List<AssessedCatch> catches, TimeSpan elapsed, List<SuspiciousPattern>? suspiciousPatterns = null, bool verbose = false)
     {
         Console.WriteLine();
         Console.ForegroundColor = ConsoleColor.White;
@@ -75,14 +75,35 @@ public static class ConsoleReporter
                 if (!string.IsNullOrEmpty(mutant.Rationale))
                     Console.WriteLine($"     Effect: {mutant.Rationale}");
 
-                // Show first assertion line as a compact test summary
-                var assertLine = c.CandidateCatch.GeneratedTest.TestCode
-                    .Split('\n')
-                    .FirstOrDefault(l => l.Contains("Assert."))
-                    ?.Trim();
+                // Show first assertion line as a compact test summary (or full code in verbose mode)
+                if (verbose)
+                {
+                    Console.ForegroundColor = ConsoleColor.DarkGray;
+                    Console.WriteLine("\n     Generated Test Code:");
+                    Console.WriteLine("     " + new string('─', 60));
+                    Console.ResetColor();
+                    
+                    var codeLines = c.CandidateCatch.GeneratedTest.TestCode.Split('\n');
+                    foreach (var line in codeLines)
+                    {
+                        Console.ForegroundColor = ConsoleColor.DarkCyan;
+                        Console.WriteLine($"     {line}");
+                    }
+                    
+                    Console.ForegroundColor = ConsoleColor.DarkGray;
+                    Console.WriteLine("     " + new string('─', 60));
+                    Console.ResetColor();
+                }
+                else
+                {
+                    var assertLine = c.CandidateCatch.GeneratedTest.TestCode
+                        .Split('\n')
+                        .FirstOrDefault(l => l.Contains("Assert."))
+                        ?.Trim();
 
-                if (assertLine is not null)
-                    Console.WriteLine($"     Test:   {assertLine}");
+                    if (assertLine is not null)
+                        Console.WriteLine($"     Test:   {assertLine}");
+                }
 
                 if (!string.IsNullOrEmpty(c.LlmAssessment) && c.LlmAssessment != "Skipped — rule-based rejection.")
                 {

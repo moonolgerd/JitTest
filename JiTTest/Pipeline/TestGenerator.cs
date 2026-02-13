@@ -27,6 +27,16 @@ public class TestGenerator(IChatClient chatClient, RoslynCompiler compiler, JiTT
         var testCode = LlmResponseParser.ExtractCSharpCode(response.Text ?? "");
         result.TestCode = testCode;
 
+        if (config.Verbose)
+        {
+            Console.ForegroundColor = ConsoleColor.DarkCyan;
+            Console.WriteLine($"[TestGen] Generated test code for {mutant.Id}:");
+            Console.WriteLine(new string('─', 60));
+            Console.WriteLine(testCode);
+            Console.WriteLine(new string('─', 60));
+            Console.ResetColor();
+        }
+
         // Roslyn compilation check — auto-fix missing usings first
         var (success, errors) = compiler.Compile(testCode);
         if (!success)
@@ -37,6 +47,13 @@ public class TestGenerator(IChatClient chatClient, RoslynCompiler compiler, JiTT
                 testCode = fixedCode;
                 result.TestCode = testCode;
                 (success, errors) = compiler.Compile(testCode);
+                
+                if (config.Verbose)
+                {
+                    Console.ForegroundColor = ConsoleColor.DarkYellow;
+                    Console.WriteLine($"[TestGen] Auto-fixed usings for {mutant.Id}");
+                    Console.ResetColor();
+                }
             }
         }
         result.CompilationSuccess = success;
@@ -59,6 +76,16 @@ public class TestGenerator(IChatClient chatClient, RoslynCompiler compiler, JiTT
             var fixMessages = PromptTemplates.GetCompilationFixPrompt(testCode, errors);
             response = await chatClient.GetResponseAsync(fixMessages);
             testCode = LlmResponseParser.ExtractCSharpCode(response.Text ?? "");
+
+            if (config.Verbose)
+            {
+                Console.ForegroundColor = ConsoleColor.DarkCyan;
+                Console.WriteLine($"[TestGen] Retry {result.RetryCount} generated code:");
+                Console.WriteLine(new string('─', 60));
+                Console.WriteLine(testCode);
+                Console.WriteLine(new string('─', 60));
+                Console.ResetColor();
+            }
 
             // Auto-fix missing usings on retry output too
             var (retrySuccess, retryErrors) = compiler.Compile(testCode);
