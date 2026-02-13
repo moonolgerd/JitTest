@@ -1,8 +1,8 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
-using AspireWithDapr.JiTTest.Configuration;
-using AspireWithDapr.JiTTest.LLM;
-using AspireWithDapr.JiTTest.Pipeline;
+using JiTTest.Configuration;
+using JiTTest.LLM;
+using JiTTest.Pipeline;
 
 // ── CLI definition using System.CommandLine ──────────────────────────
 

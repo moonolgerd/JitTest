@@ -2,7 +2,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using System.Text.RegularExpressions;
 
-namespace AspireWithDapr.JiTTest.Compilation;
+namespace JiTTest.Compilation;
 
 /// <summary>
 /// Compiles C# test code in-memory using Roslyn, returning success/failure + diagnostics.
@@ -32,11 +32,6 @@ public class RoslynCompiler
         ["IServiceProvider"] = "using Microsoft.Extensions.DependencyInjection;",
         ["IHost"] = "using Microsoft.Extensions.Hosting;",
         ["BackgroundService"] = "using Microsoft.Extensions.Hosting;",
-        ["WeatherForecast"] = "using AspireWithDapr.Shared;",
-        ["WeatherUtilities"] = "using AspireWithDapr.Shared;",
-        ["SharedCollections"] = "using AspireWithDapr.Shared;",
-        ["SharedConstants"] = "using AspireWithDapr.Shared;",
-        ["PublisherHostedService"] = "using AspireWithDapr.Publisher;",
         ["CancellationToken"] = "using System.Threading;",
         ["CancellationTokenSource"] = "using System.Threading;",
         ["Random"] = "using System;",
@@ -296,7 +291,7 @@ public class RoslynCompiler
         {
             Console.ForegroundColor = ConsoleColor.DarkGray;
             Console.WriteLine($"  [Roslyn] Loaded {refs.Count} assembly references");
-            var interestingRefs = new[] { "NSubstitute", "Logging", "DependencyInjection", "Hosting", "Dapr", "AspireWithDapr", "Publisher", "Shared" };
+            var interestingRefs = new[] { "NSubstitute", "Logging", "DependencyInjection", "Hosting", "Dapr" };
             foreach (var r in refs.OfType<PortableExecutableReference>())
             {
                 var name = Path.GetFileName(r.FilePath ?? "");

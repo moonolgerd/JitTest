@@ -1,9 +1,9 @@
 using System.ClientModel;
 using Microsoft.Extensions.AI;
 using OpenAI;
-using AspireWithDapr.JiTTest.Configuration;
+using JiTTest.Configuration;
 
-namespace AspireWithDapr.JiTTest.LLM;
+namespace JiTTest.LLM;
 
 /// <summary>
 /// Creates an IChatClient that talks to Ollama's OpenAI-compatible API.

@@ -1,8 +1,8 @@
 using System.Text;
-using AspireWithDapr.JiTTest.Models;
-using AspireWithDapr.JiTTest.Pipeline;
+using JiTTest.Models;
+using JiTTest.Pipeline;
 
-namespace AspireWithDapr.JiTTest.Reporting;
+namespace JiTTest.Reporting;
 
 /// <summary>
 /// Writes JiTTest results to a markdown file.

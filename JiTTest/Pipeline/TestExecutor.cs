@@ -1,9 +1,9 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
-using AspireWithDapr.JiTTest.Models;
-using AspireWithDapr.JiTTest.Configuration;
+using JiTTest.Models;
+using JiTTest.Configuration;
 
-namespace AspireWithDapr.JiTTest.Pipeline;
+namespace JiTTest.Pipeline;
 
 /// <summary>
 /// Executes generated tests against original and mutated code using a transient test project.
@@ -156,9 +156,8 @@ public class TestExecutor(JiTTestConfig config)
         }
         else
         {
-            // Fallback: reference the real Shared project directly
-            shadowCsproj = Path.GetFullPath(Path.Combine(config.RepositoryRoot,
-                "AspireWithDapr.Shared", "AspireWithDapr.Shared.csproj"));
+            // Fallback: reference cannot be found, test may fail
+            shadowCsproj = Path.GetFullPath(Path.Combine(config.RepositoryRoot, "target.csproj"));
         }
 
         // Transient test project with NSubstitute for mocking

@@ -1,10 +1,10 @@
 using LibGit2Sharp;
 using Microsoft.Extensions.FileSystemGlobbing;
 using Microsoft.Extensions.FileSystemGlobbing.Abstractions;
-using AspireWithDapr.JiTTest.Configuration;
-using AspireWithDapr.JiTTest.Models;
+using JiTTest.Configuration;
+using JiTTest.Models;
 
-namespace AspireWithDapr.JiTTest.Pipeline;
+namespace JiTTest.Pipeline;
 
 /// <summary>
 /// Extracts code changes from git, producing a structured ChangeSet.

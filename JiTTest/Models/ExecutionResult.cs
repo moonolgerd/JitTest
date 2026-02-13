@@ -1,4 +1,4 @@
-namespace AspireWithDapr.JiTTest.Models;
+namespace JiTTest.Models;
 
 /// <summary>
 /// Result of executing a generated test against original and mutated code.

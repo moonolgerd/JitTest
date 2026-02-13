@@ -27,7 +27,7 @@ Inspired by [Meta's Catching JiTTest research](https://engineering.fb.com/2026/0
 ### Install as Global Tool
 
 ```bash
-cd AspireWithDapr.JiTTest
+cd JiTTest
 dotnet pack -c Release
 dotnet tool install --global --add-source ./bin/Release JitTest
 ```

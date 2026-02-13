@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
-namespace AspireWithDapr.JiTTest.LLM;
+namespace JiTTest.LLM;
 
 /// <summary>
 /// Parses LLM responses, extracting JSON from potentially noisy output.

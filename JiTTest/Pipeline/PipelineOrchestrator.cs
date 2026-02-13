@@ -1,13 +1,13 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using AspireWithDapr.JiTTest.Configuration;
-using AspireWithDapr.JiTTest.Compilation;
-using AspireWithDapr.JiTTest.LLM;
-using AspireWithDapr.JiTTest.Models;
-using AspireWithDapr.JiTTest.Reporting;
+using JiTTest.Configuration;
+using JiTTest.Compilation;
+using JiTTest.LLM;
+using JiTTest.Models;
+using JiTTest.Reporting;
 using Microsoft.Extensions.AI;
 
-namespace AspireWithDapr.JiTTest.Pipeline;
+namespace JiTTest.Pipeline;
 
 /// <summary>
 /// Orchestrates the full JiTTest pipeline: Diff → Intent → Mutants → Tests → Execute → Assess → Report.

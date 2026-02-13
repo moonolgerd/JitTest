@@ -2,11 +2,11 @@ using Microsoft.Extensions.AI;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using AspireWithDapr.JiTTest.Models;
-using AspireWithDapr.JiTTest.LLM;
-using AspireWithDapr.JiTTest.Configuration;
+using JiTTest.Models;
+using JiTTest.LLM;
+using JiTTest.Configuration;
 
-namespace AspireWithDapr.JiTTest.Pipeline;
+namespace JiTTest.Pipeline;
 
 /// <summary>
 /// Uses an LLM to generate realistic code mutants based on intent and diff.

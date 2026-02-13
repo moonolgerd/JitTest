@@ -4,7 +4,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    AspireWithDapr.JiTTest                        │
+│                         JiTTest                                  │
 │                     (Console App / dotnet tool)                  │
 │                                                                  │
 │  ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────────┐ │
@@ -34,17 +34,17 @@
          │ OpenAI-compat API        │
          ▼                          │
    ┌───────────┐            ┌───────────────┐
-   │  Ollama   │            │ AspireWithDapr │
+   │  Ollama   │            │    Target      │
    │ localhost │            │   Projects     │
-   │  :11434   │            │ (Shared, API)  │
+   │  :11434   │            │   Under Test   │
    └───────────┘            └───────────────┘
 ```
 
 ## Project Structure
 
 ```
-AspireWithDapr.JiTTest/
-├── AspireWithDapr.JiTTest.csproj
+JiTTest/
+├── JiTTest.csproj
 ├── Program.cs                      # Entry point, CLI argument parsing
 ├── Configuration/
 │   └── JiTTestConfig.cs            # Config model + JSON deserialization
@@ -152,7 +152,7 @@ GeneratedTest
 └── ForMutant: Mutant
 ```
 
-**Prompt strategy**: Provide original code, mutated code, and instruct: *"Write an xUnit test that passes against the original but fails against the mutant. The test must be self-contained, using only types from AspireWithDapr.Shared and standard xUnit assertions."*
+**Prompt strategy**: Provide original code, mutated code, and instruct: *"Write an xUnit test that passes against the original but fails against the mutant. The test must be self-contained, using only types from the target project and standard xUnit assertions."*
 
 The system prompt includes explicit compilation rules (use all `using` directives, fully qualified names for ambiguous types, public API only, no `async void`, etc.) to reduce first-attempt compilation failures.
 
@@ -164,8 +164,7 @@ The system prompt includes explicit compilation rules (use all `using` directive
 5. If still failing after retries: skip this mutant, log the failure
 
 **Assembly references for Roslyn** (loaded from project build output, deduplicated by filename):
-- `AspireWithDapr.Shared.dll`
-- `AspireWithDapr.ApiService.dll` (when targeting actor code)
+- Target project assemblies (e.g., `YourProject.dll`)
 - `xunit.core.dll`, `xunit.assert.dll`
 - .NET 10 runtime references via `MetadataReference.CreateFromFile()`
 - Satellite assemblies (`.resources.dll`) and duplicate filenames are skipped
@@ -237,7 +236,7 @@ Formats `AssessedCatch[]` into output.
   JiTTest Report — 2 catches in 1 file
 ═══════════════════════════════════════════
 
-📁 AspireWithDapr.Shared/WeatherUtilities.cs
+📁 src/WeatherUtilities.cs
 
   🔴 CATCH #1 [HIGH confidence]
      Mutant: Changed '< -5' to '<= -5' in GetSummaryForTemperature
@@ -274,7 +273,7 @@ new OpenAIClient(
 ).AsChatClient("qwen2.5-coder:32b-instruct-q4_K_M");
 ```
 
-Same `IChatClient` interface used by `AspireWithDapr.Web/Services/ChatService.cs`. Allows future swap to any OpenAI-compatible backend by changing endpoint URL.
+Standard `IChatClient` interface allows future swap to any OpenAI-compatible backend by changing endpoint URL.
 
 ### Prompt Templates
 
@@ -298,8 +297,7 @@ All prompts stored in `PromptTemplates.cs` as static methods returning `ChatMess
     "model": "qwen2.5-coder:32b-instruct-q4_K_M",
     "diff-source": "staged",
     "mutate-targets": [
-      "**/AspireWithDapr.Shared/**/*.cs",
-      "**/AspireWithDapr.ApiService/**/*.cs"
+      "**/*.cs"
     ],
     "exclude": [
       "**/Program.cs",
@@ -319,7 +317,7 @@ All prompts stored in `PromptTemplates.cs` as static methods returning `ChatMess
 ## CLI Interface
 
 ```
-dotnet run --project AspireWithDapr.JiTTest -- [options]
+jittest [options]
 
 Options:
   --diff <source>       Diff source: staged, uncommitted, branch:<name>, HEAD~<n>

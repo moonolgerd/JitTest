@@ -1,9 +1,9 @@
 using Microsoft.Extensions.AI;
-using AspireWithDapr.JiTTest.Models;
-using AspireWithDapr.JiTTest.LLM;
-using AspireWithDapr.JiTTest.Configuration;
+using JiTTest.Models;
+using JiTTest.LLM;
+using JiTTest.Configuration;
 
-namespace AspireWithDapr.JiTTest.Pipeline;
+namespace JiTTest.Pipeline;
 
 /// <summary>
 /// Uses an LLM to infer the developer's intent from a code change.

@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace AspireWithDapr.JiTTest.Configuration;
+namespace JiTTest.Configuration;
 
 /// <summary>
 /// Configuration for the JiTTest pipeline, loaded from jittest-config.json with CLI overrides.
@@ -9,50 +9,41 @@ namespace AspireWithDapr.JiTTest.Configuration;
 public class JiTTestConfig
 {
     [JsonPropertyName("ollama-endpoint")]
-    public string OllamaEndpoint { get; set; } = "http://localhost:11434/v1";
+    public string OllamaEndpoint { get; set; } = default!;
 
     [JsonPropertyName("model")]
-    public string Model { get; set; } = "qwen2.5-coder:32b-instruct-q4_K_M";
+    public string Model { get; set; } = default!;
 
     [JsonPropertyName("diff-source")]
-    public string DiffSource { get; set; } = "staged";
+    public string DiffSource { get; set; } = default!;
 
     [JsonPropertyName("mutate-targets")]
-    public List<string> MutateTargets { get; set; } =
-    [
-        "**/AspireWithDapr.Shared/**/*.cs",
-        "**/AspireWithDapr.ApiService/**/*.cs"
-    ];
+    public List<string> MutateTargets { get; set; } = default!;
 
     [JsonPropertyName("exclude")]
-    public List<string> Exclude { get; set; } =
-    [
-        "**/Program.cs",
-        "**/obj/**",
-        "**/bin/**"
-    ];
+    public List<string> Exclude { get; set; } = default!;
 
     [JsonPropertyName("max-mutants-per-change")]
-    public int MaxMutantsPerChange { get; set; } = 5;
+    public int MaxMutantsPerChange { get; set; }
 
     [JsonPropertyName("max-retries")]
-    public int MaxRetries { get; set; } = 2;
+    public int MaxRetries { get; set; }
 
     [JsonPropertyName("confidence-threshold")]
-    public string ConfidenceThreshold { get; set; } = "MEDIUM";
+    public string ConfidenceThreshold { get; set; } = default!;
 
     [JsonPropertyName("reporters")]
-    public List<string> Reporters { get; set; } = ["console"];
+    public List<string> Reporters { get; set; } = default!;
 
     [JsonPropertyName("temp-directory")]
-    public string TempDirectory { get; set; } = ".jittest-temp";
+    public string TempDirectory { get; set; } = default!;
 
     [JsonPropertyName("max-parallel")]
-    public int MaxParallel { get; set; } = 3;
+    public int MaxParallel { get; set; }
 
     /// <summary>Absolute path to the git repository root (resolved at runtime).</summary>
     [JsonIgnore]
-    public string RepositoryRoot { get; set; } = "";
+    public string RepositoryRoot { get; set; } = default!;
 
     /// <summary>Whether to show verbose LLM prompt/response output.</summary>
     [JsonIgnore]

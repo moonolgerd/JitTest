@@ -1,4 +1,4 @@
-namespace AspireWithDapr.JiTTest.Models;
+namespace JiTTest.Models;
 
 /// <summary>
 /// Represents a parsed set of code changes from git diff.

@@ -1,10 +1,10 @@
 using Microsoft.Extensions.AI;
-using AspireWithDapr.JiTTest.Models;
-using AspireWithDapr.JiTTest.LLM;
-using AspireWithDapr.JiTTest.Compilation;
-using AspireWithDapr.JiTTest.Configuration;
+using JiTTest.Models;
+using JiTTest.LLM;
+using JiTTest.Compilation;
+using JiTTest.Configuration;
 
-namespace AspireWithDapr.JiTTest.Pipeline;
+namespace JiTTest.Pipeline;
 
 /// <summary>
 /// Uses an LLM to generate xUnit tests for each mutant, with Roslyn compilation validation.

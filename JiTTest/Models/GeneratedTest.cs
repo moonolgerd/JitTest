@@ -1,4 +1,4 @@
-namespace AspireWithDapr.JiTTest.Models;
+namespace JiTTest.Models;
 
 /// <summary>
 /// An LLM-generated test and its compilation status.

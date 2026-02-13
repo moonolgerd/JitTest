@@ -1,9 +1,9 @@
 using Microsoft.Extensions.AI;
-using AspireWithDapr.JiTTest.Models;
-using AspireWithDapr.JiTTest.LLM;
-using AspireWithDapr.JiTTest.Configuration;
+using JiTTest.Models;
+using JiTTest.LLM;
+using JiTTest.Configuration;
 
-namespace AspireWithDapr.JiTTest.Pipeline;
+namespace JiTTest.Pipeline;
 
 /// <summary>
 /// Evaluates candidate catches using rule-based and LLM-based assessment.

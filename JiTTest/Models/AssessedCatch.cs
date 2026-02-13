@@ -1,4 +1,4 @@
-namespace AspireWithDapr.JiTTest.Models;
+namespace JiTTest.Models;
 
 /// <summary>
 /// A candidate catch that has been evaluated by rule-based and LLM assessors.

@@ -1,4 +1,4 @@
-namespace AspireWithDapr.JiTTest.Models;
+namespace JiTTest.Models;
 
 /// <summary>
 /// LLM-inferred intent of a code change.

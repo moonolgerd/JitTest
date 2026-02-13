@@ -1,7 +1,7 @@
 using Microsoft.Extensions.AI;
-using AspireWithDapr.JiTTest.Models;
+using JiTTest.Models;
 
-namespace AspireWithDapr.JiTTest.LLM;
+namespace JiTTest.LLM;
 
 /// <summary>
 /// Prompt templates for each JiTTest pipeline stage.
@@ -107,7 +107,7 @@ public static class PromptTemplates
                   "id": "M001",
                   "description": "Changed boundary from '< -5' to '<= -5' in GetSummaryForTemperature",
                   "rationale": "Off-by-one error — temperature -5 would be classified as Freezing instead of Bracing",
-                  "targetFile": "AspireWithDapr.Shared/WeatherUtilities.cs",
+                  "targetFile": "src/WeatherUtilities.cs",
                   "originalCode": "< -5",
                   "mutatedCode": "<= -5",
                   "lineStart": 20,
@@ -160,7 +160,7 @@ public static class PromptTemplates
                   using System.Linq;                                   // For LINQ methods
                   using System.Threading;                              // For CancellationToken
                   using System.Threading.Tasks;                        // For Task, async
-                Add the namespace of the code under test (e.g. using AspireWithDapr.Shared;)
+                Add the namespace of the code under test (e.g. using YourProject.Module;)
                 If the code uses Dapr: using Dapr.Client;
 
                 ═══ ACCESSIBILITY RULES — MUST FOLLOW ═══

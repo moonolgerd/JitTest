@@ -12,7 +12,7 @@
 
 ### Task 1.1: Create JiTTest console project
 
-- Create `AspireWithDapr.JiTTest/AspireWithDapr.JiTTest.csproj` targeting `net10.0`
+- Create `JiTTest/JiTTest.csproj` targeting `net10.0`
 - Add NuGet packages:
   - `Microsoft.Extensions.AI.OpenAI`
   - `LibGit2Sharp`
@@ -23,28 +23,27 @@
   - `xunit.runner.utility`
   - `Microsoft.Extensions.FileGlobbing`
   - `System.CommandLine` (CLI parsing)
-- Add project references:
-  - `AspireWithDapr.Shared`
-  - `AspireWithDapr.ApiService`
-- **Acceptance**: `dotnet build AspireWithDapr.JiTTest` succeeds
+- **Acceptance**: `dotnet build JiTTest` succeeds
 
 ### Task 1.2: Register in solution
 
-- Add the project to `AspireWithDapr.slnx`
-- **Acceptance**: `dotnet build AspireWithDapr.slnx` succeeds
+- Add the project to `JitTest.slnx`
+- **Acceptance**: `dotnet build JitTest.slnx` succeeds
 
 ### Task 1.3: Create folder structure
 
 - Create directories: `Configuration/`, `Pipeline/`, `Models/`, `LLM/`, `Compilation/`, `Reporting/`
-- Create placeholder files with namespace declarations
+- Create placeholder files with namespace `JiTTest.*` declarations
 - **Acceptance**: Project compiles with empty class stubs
 
 ### Task 1.4: Configuration system
 
 - Implement `JiTTestConfig.cs` — POCO matching `jittest-config.json` schema
-- Create default `jittest-config.json` at project root
-- Implement config loading: JSON file → CLI overrides → defaults
-- **Acceptance**: Config loads from file, CLI args override values
+- All properties use `default!` for reference types (no hardcoded defaults)
+- Configuration values must be provided via JSON file or CLI overrides
+- Create default `jittest-config.json` at project root with all required settings
+- Implement config loading: JSON file → CLI overrides → validation
+- **Acceptance**: Config loads from file, CLI args override values, missing required values produce clear errors
 
 ### Task 1.5: CLI entry point
 
@@ -76,6 +75,7 @@
   - `GetAssessmentPrompt(Mutant mutant, string testCode, string changeContext) → ChatMessage[]`
 - Include few-shot examples for each prompt (2 examples minimum)
 - All prompts request structured JSON output with explicit schema
+- Use generic project references (not AspireWithDapr-specific)
 - **Acceptance**: Each prompt template produces valid `ChatMessage[]` with system + user messages
 
 ### Task 2.3: LLM response parsing
@@ -101,7 +101,7 @@
 
 - Apply glob patterns from `mutate-targets` and `exclude` config using `Microsoft.Extensions.FileGlobbing`
 - Only process files matching include patterns that don't match exclude patterns
-- **Acceptance**: Changing `Program.cs` produces empty filtered result; changing `WeatherUtilities.cs` is included
+- **Acceptance**: Changing `Program.cs` produces empty filtered result; changing target source files are included
 
 **Estimated effort**: 2–3 hours
 
@@ -111,10 +111,10 @@
 
 ### Task 4.1: Intent inferrer
 
-- Implement `IntentInferrer.cs`
+- Implement `IntentInferrer.cs` (namespace: `JiTTest.Pipeline`)
 - Send `ChangeSet` through intent prompt template to `IChatClient`
 - Parse response into `IntentSummary` model
-- **Acceptance**: Given a diff of `WeatherUtilities.cs`, produces a sensible intent summary
+- **Acceptance**: Given a diff of a source file, produces a sensible intent summary
 
 ### Task 4.2: Mutant generator
 
@@ -126,9 +126,10 @@
 
 ### Task 4.3: Roslyn compiler
 
-- Implement `RoslynCompiler.cs`
+- Implement `RoslynCompiler.cs` (namespace: `JiTTest.Compilation`)
 - Compile test code in-memory with `CSharpCompilation.Create()`
 - Load assembly references from project build outputs + xUnit packages
+- Auto-fix using directives map removed (generic, no project-specific mappings)
 - Return compilation success/failure + diagnostics
 - **Acceptance**: A valid xUnit test compiles successfully; an invalid one returns clear errors
 
@@ -205,7 +206,7 @@
 
 ### Task 6.1: End-to-end dry run
 
-- Test the full pipeline against a real change in `WeatherUtilities.cs`
+- Test the full pipeline against a real change in target source files
 - Verify: diff extracted → intent inferred → mutants generated → tests compiled → tests executed → catches assessed → report produced
 - Fix any issues discovered
 - **Acceptance**: Pipeline produces meaningful catches for a boundary change
@@ -226,7 +227,7 @@
 
 ### Task 6.4: Git pre-commit hook (optional)
 
-- Create `.githooks/pre-commit` script that runs `dotnet run --project AspireWithDapr.JiTTest -- --diff staged`
+- Create `.githooks/pre-commit` script that runs `dotnet run --project JiTTest -- --diff staged`
 - Document setup: `git config core.hooksPath .githooks`
 - **Acceptance**: Committing a change to target files triggers JiTTest automatically
 
@@ -242,7 +243,12 @@
 
 ---
 
-## Phase 7: Performance Optimization (Completed)
+## Phase 7: Performance Optimization & Refactoring (Completed)
+
+### Task 7.0: Namespace refactoring
+
+- [x] Made code generic and reusable for any .NET project
+- **Acceptance**: All code uses `JiTTest.*` namespaces consistently, builds successfully
 
 ### Task 7.1: Configurable parallelism
 

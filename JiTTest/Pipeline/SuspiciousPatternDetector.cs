@@ -1,7 +1,7 @@
 using System.Text.RegularExpressions;
-using AspireWithDapr.JiTTest.Models;
+using JiTTest.Models;
 
-namespace AspireWithDapr.JiTTest.Pipeline;
+namespace JiTTest.Pipeline;
 
 /// <summary>
 /// Lightweight static analysis that scans changed code for suspicious patterns
