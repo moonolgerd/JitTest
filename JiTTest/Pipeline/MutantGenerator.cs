@@ -64,8 +64,9 @@ public class MutantGenerator(IChatClient chatClient, JiTTestConfig config)
             }
             else if (config.Verbose)
             {
+                var reason = GetValidationFailureReason(mutant, changeSet);
                 Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine($"[Mutant] Skipping invalid mutant {mutant.Id}: originalCode not found in file");
+                Console.WriteLine($"[Mutant] Skipping invalid mutant {mutant.Id}: {reason}");
                 Console.ResetColor();
             }
         }
@@ -88,7 +89,58 @@ public class MutantGenerator(IChatClient chatClient, JiTTestConfig config)
 
         if (targetFile is null) return false;
 
-        return targetFile.FullFileContent.Contains(mutant.OriginalCode);
+        // Try exact match first
+        if (targetFile.FullFileContent.Contains(mutant.OriginalCode))
+            return true;
+
+        // Fallback: try whitespace-normalized comparison
+        // LLMs sometimes format code slightly differently
+        var normalizedOriginal = NormalizeWhitespace(mutant.OriginalCode);
+        var normalizedFile = NormalizeWhitespace(targetFile.FullFileContent);
+
+        return normalizedFile.Contains(normalizedOriginal);
+    }
+
+    /// <summary>
+    /// Normalize whitespace for more forgiving code comparison.
+    /// Collapses runs of whitespace to single spaces, but preserves overall structure.
+    /// </summary>
+    private static string NormalizeWhitespace(string code)
+    {
+        return System.Text.RegularExpressions.Regex.Replace(
+            code.Trim(),
+            @"\s+",
+            " "
+        );
+    }
+
+    /// <summary>
+    /// Get detailed reason why a mutant validation failed (for diagnostics).
+    /// </summary>
+    private static string GetValidationFailureReason(Mutant mutant, ChangeSet changeSet)
+    {
+        if (string.IsNullOrEmpty(mutant.OriginalCode))
+            return "originalCode is empty";
+
+        if (string.IsNullOrEmpty(mutant.MutatedCode))
+            return "mutatedCode is empty";
+
+        if (mutant.OriginalCode == mutant.MutatedCode)
+            return "originalCode and mutatedCode are identical";
+
+        var targetFile = changeSet.Files.FirstOrDefault(f =>
+            f.FilePath.Equals(mutant.TargetFile, StringComparison.OrdinalIgnoreCase) ||
+            f.FilePath.EndsWith(mutant.TargetFile, StringComparison.OrdinalIgnoreCase));
+
+        if (targetFile is null)
+            return $"target file '{mutant.TargetFile}' not found in changeset";
+
+        // Show a preview of what was expected
+        var preview = mutant.OriginalCode.Length > 100
+            ? mutant.OriginalCode[..100] + "..."
+            : mutant.OriginalCode;
+
+        return $"originalCode not found in file. Expected: '{preview}'";
     }
 
     /// <summary>

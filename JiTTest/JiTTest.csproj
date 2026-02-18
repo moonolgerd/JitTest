@@ -10,12 +10,12 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>jittest</ToolCommandName>
     <PackageId>JitTest</PackageId>
-    <Version>1.6.3</Version>
-    <Authors>Your Name</Authors>
+    <Version>1.6.5</Version>
+    <Authors>moonolgerd</Authors>
     <Description>LLM-driven catching test generator - ephemeral mutation testing for .NET projects</Description>
     <PackageTags>testing;mutation-testing;llm;ollama;jittest</PackageTags>
-    <PackageProjectUrl>https://github.com/yourusername/jittest</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/yourusername/jittest</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/moonolgerd/jittest</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/moonolgerd/jittest</RepositoryUrl>
   </PropertyGroup>
 
   <ItemGroup>
