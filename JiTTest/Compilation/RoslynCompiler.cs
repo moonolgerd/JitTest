@@ -31,14 +31,31 @@ public class RoslynCompiler
             // Stop when we hit namespace, class, or other non-using declarations
             if (trimmed.StartsWith("using ") && !trimmed.StartsWith("using (") && !trimmed.StartsWith("using var "))
             {
-                usings.Add(trimmed.TrimEnd());
+                // Strip everything after the first semicolon so we don't keep trailing comments,
+                // e.g. "using X; // note" -> "using X;"
+                var semicolonIndex = trimmed.IndexOf(';');
+                if (semicolonIndex >= 0)
+                {
+                    var usingDirective = trimmed.Substring(0, semicolonIndex + 1).TrimEnd();
+                    usings.Add(usingDirective);
+                }
+                else
+                {
+                    // Fallback for malformed lines without a semicolon: preserve prior behavior
+                    usings.Add(trimmed.TrimEnd());
+                }
+            }
+            else if (trimmed.Length == 0 || trimmed.StartsWith("//") || trimmed.StartsWith("/*"))
+            {
+                // Allow blank lines and comments between using directives
+                continue;
             }
             else if (trimmed.StartsWith("namespace ") || trimmed.StartsWith("public ") ||
                      trimmed.StartsWith("internal ") || trimmed.StartsWith("private ") ||
-                     trimmed.StartsWith("[assembly") || trimmed.StartsWith("//") ||
+                     trimmed.StartsWith("[assembly") ||
                      (trimmed.Length > 0 && !trimmed.StartsWith("using ")))
             {
-                // Stop at first declaration or comment after usings block
+                // Stop at first declaration or other non-using code after usings block
                 if (usings.Count > 0)
                     break;
             }
@@ -147,12 +164,27 @@ public class RoslynCompiler
         {
             foreach (var sourceUsing in sourceUsings)
             {
-                // Normalize the using statement (trim semicolon for comparison)
-                var normalized = sourceUsing.TrimEnd(';', ' ', '\r', '\n');
-                if (!sourceCode.Contains(normalized, StringComparison.OrdinalIgnoreCase))
+                // Build a comparison key without trailing comments or semicolon.
+                var comparison = sourceUsing;
+
+                // Strip trailing line comments.
+                var commentIndex = comparison.IndexOf("//", StringComparison.Ordinal);
+                if (commentIndex >= 0)
+                    comparison = comparison.Substring(0, commentIndex);
+
+                // Remove trailing whitespace and any trailing semicolon for comparison.
+                comparison = comparison.TrimEnd();
+                if (comparison.EndsWith(";", StringComparison.Ordinal))
+                    comparison = comparison.TrimEnd(';').TrimEnd();
+
+                if (comparison.Length == 0)
+                    continue;
+
+                if (!sourceCode.Contains(comparison, StringComparison.OrdinalIgnoreCase))
                 {
-                    // Ensure it ends with semicolon
-                    missingUsings.Add(normalized.EndsWith(';') ? normalized : normalized + ";");
+                    // Emit a canonical using line: "using ...;"
+                    var canonicalUsing = comparison + ";";
+                    missingUsings.Add(canonicalUsing);
                 }
             }
         }
