@@ -153,7 +153,7 @@ public class PipelineOrchestrator(JiTTestConfig config)
             Console.ResetColor();
         }
         
-        var compiler = new RoslynCompiler(buildOutputPaths, config.Verbose);
+        var compiler = new RoslynCompiler(buildOutputPaths, config.Verbose, config.RepositoryRoot);
         var testGenerator = new TestGenerator(chatClient, compiler, config);
         var tests = new ConcurrentBag<GeneratedTest>();
 

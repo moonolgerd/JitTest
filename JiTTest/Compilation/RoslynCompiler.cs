@@ -12,10 +12,27 @@ namespace JiTTest.Compilation;
 public class RoslynCompiler
 {
     private readonly List<MetadataReference> _references;
+    private readonly string[] _globalUsings;
+
+    /// <summary>
+    /// Standard SDK implicit usings injected for all projects with &lt;ImplicitUsings&gt;enable&lt;/ImplicitUsings&gt;.
+    /// These match what the .NET SDK adds automatically so in-memory Roslyn compilation aligns with dotnet build.
+    /// </summary>
+    private static readonly string[] s_sdkImplicitUsings =
+    [
+        "global using global::System;",
+        "global using global::System.Collections.Generic;",
+        "global using global::System.IO;",
+        "global using global::System.Linq;",
+        "global using global::System.Net.Http;",
+        "global using global::System.Threading;",
+        "global using global::System.Threading.Tasks;",
+    ];
 
     /// <summary>
     /// Extract all using directives from a C# source file.
     /// Returns both standard 'using Namespace;' and 'using static Type;' directives.
+    /// Normalizes 'global using global::X;' to 'using X;' for use in test files.
     /// </summary>
     public static List<string> ExtractUsingDirectives(string sourceCode)
     {
@@ -27,9 +44,12 @@ public class RoslynCompiler
         foreach (var line in lines)
         {
             var trimmed = line.TrimStart();
-            // Match: using Something; or using static Something;
+            // Match: using Something; OR using static Something; OR global using global::Something;
             // Stop when we hit namespace, class, or other non-using declarations
-            if (trimmed.StartsWith("using ") && !trimmed.StartsWith("using (") && !trimmed.StartsWith("using var "))
+            var isUsing = (trimmed.StartsWith("using ") && !trimmed.StartsWith("using (") && !trimmed.StartsWith("using var "))
+                           || trimmed.StartsWith("global using ");
+
+            if (isUsing)
             {
                 // Strip everything after the first semicolon so we don't keep trailing comments,
                 // e.g. "using X; // note" -> "using X;"
@@ -37,6 +57,11 @@ public class RoslynCompiler
                 if (semicolonIndex >= 0)
                 {
                     var usingDirective = trimmed.Substring(0, semicolonIndex + 1).TrimEnd();
+                    // Normalize "global using global::X;" → "using X;"
+                    if (usingDirective.StartsWith("global using global::", StringComparison.OrdinalIgnoreCase))
+                        usingDirective = "using " + usingDirective["global using global::".Length..];
+                    else if (usingDirective.StartsWith("global using ", StringComparison.OrdinalIgnoreCase))
+                        usingDirective = "using " + usingDirective["global using ".Length..];
                     usings.Add(usingDirective);
                 }
                 else
@@ -53,7 +78,7 @@ public class RoslynCompiler
             else if (trimmed.StartsWith("namespace ") || trimmed.StartsWith("public ") ||
                      trimmed.StartsWith("internal ") || trimmed.StartsWith("private ") ||
                      trimmed.StartsWith("[assembly") ||
-                     (trimmed.Length > 0 && !trimmed.StartsWith("using ")))
+                     (trimmed.Length > 0 && !trimmed.StartsWith("using ") && !trimmed.StartsWith("global ")))
             {
                 // Stop at first declaration or other non-using code after usings block
                 if (usings.Count > 0)
@@ -62,6 +87,24 @@ public class RoslynCompiler
         }
 
         return usings.Distinct().ToList();
+    }
+
+    /// <summary>
+    /// Extract the first namespace declaration from C# source code.
+    /// Handles both file-scoped ("namespace Foo;") and block ("namespace Foo {") forms.
+    /// </summary>
+    public static string? ExtractNamespace(string sourceCode)
+    {
+        if (string.IsNullOrWhiteSpace(sourceCode)) return null;
+        foreach (var line in sourceCode.Split('\n'))
+        {
+            var trimmed = line.TrimStart();
+            if (!trimmed.StartsWith("namespace ")) continue;
+            var ns = trimmed["namespace ".Length..].TrimEnd('{', ';', ' ', '\t', '\r', '\n').Trim();
+            if (!string.IsNullOrEmpty(ns))
+                return ns;
+        }
+        return null;
     }
 
     /// <summary>
@@ -116,21 +159,130 @@ public class RoslynCompiler
         ["Count"] = "using System.Linq;",
     };
 
-    public RoslynCompiler(string[]? projectBuildOutputPaths = null, bool verbose = false)
+    public RoslynCompiler(string[]? projectBuildOutputPaths = null, bool verbose = false, string? repositoryRoot = null)
     {
         _references = LoadReferences(projectBuildOutputPaths, verbose);
+        _globalUsings = DiscoverGlobalUsings(projectBuildOutputPaths, repositoryRoot, verbose);
+    }
+
+    /// <summary>
+    /// The namespaces available globally in this compilation context (SDK implicit + project-specific).
+    /// Suitable for injecting into LLM prompts to show what's already in scope.
+    /// </summary>
+    public IReadOnlyList<string> GlobalUsingNamespaces =>
+        _globalUsings
+            .Select(u =>
+            {
+                var ns = u.TrimEnd(';').Trim();
+                if (ns.StartsWith("global using global::", StringComparison.Ordinal))
+                    return ns["global using global::".Length..];
+                if (ns.StartsWith("global using ", StringComparison.Ordinal))
+                    return ns["global using ".Length..];
+                return ns;
+            })
+            .Order()
+            .ToList();
+
+    /// <summary>
+    /// Discovers global using directives for the project:
+    /// SDK implicit usings + auto-generated *.GlobalUsings.g.cs + explicit GlobalUsings.cs source files.
+    /// </summary>
+    public static string[] DiscoverGlobalUsings(string[]? buildOutputPaths, string? repositoryRoot, bool verbose = false)
+    {
+        var discovered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Always include SDK default implicit usings
+        foreach (var u in s_sdkImplicitUsings)
+            discovered.Add(u);
+
+        // Collect candidate project roots (where obj/ directories live)
+        var searchRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (repositoryRoot is not null && Directory.Exists(repositoryRoot))
+            searchRoots.Add(repositoryRoot);
+
+        // Walk up from each build output path to find project roots
+        foreach (var buildPath in buildOutputPaths ?? [])
+        {
+            var dir = buildPath;
+            for (var i = 0; i < 4 && dir is not null; i++)
+            {
+                var parent = Path.GetDirectoryName(dir);
+                if (parent is not null && Directory.Exists(Path.Combine(parent, "obj")))
+                    searchRoots.Add(parent);
+                dir = parent;
+            }
+        }
+
+        foreach (var root in searchRoots)
+        {
+            var objDir = Path.Combine(root, "obj");
+            if (!Directory.Exists(objDir)) continue;
+
+            // Scan auto-generated GlobalUsings.g.cs files in obj/
+            try
+            {
+                foreach (var file in Directory.GetFiles(objDir, "*.GlobalUsings.g.cs", SearchOption.AllDirectories))
+                {
+                    foreach (var line in File.ReadAllText(file).Split('\n'))
+                    {
+                        var t = line.Trim();
+                        if (t.StartsWith("global using ") && t.EndsWith(";"))
+                            discovered.Add(t);
+                    }
+                }
+            }
+            catch { /* best effort */ }
+
+            // Scan hand-authored GlobalUsings.cs source files
+            try
+            {
+                var sep = Path.DirectorySeparatorChar;
+                foreach (var file in Directory.GetFiles(root, "GlobalUsings.cs", SearchOption.AllDirectories)
+                    .Where(f => !f.Contains($"{sep}obj{sep}") && !f.Contains($"{sep}bin{sep}")))
+                {
+                    foreach (var line in File.ReadAllText(file).Split('\n'))
+                    {
+                        var t = line.Trim();
+                        if (t.StartsWith("global using ") && t.EndsWith(";"))
+                            discovered.Add(t);
+                    }
+                }
+            }
+            catch { /* best effort */ }
+        }
+
+        if (verbose)
+        {
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine($"  [Roslyn] Global usings discovered: {discovered.Count}");
+            Console.ResetColor();
+        }
+
+        return [.. discovered];
     }
 
     /// <summary>
     /// Compile the given C# source code. Returns (success, errors).
+    /// Automatically includes global using directives (SDK implicit + project-specific)
+    /// so in-memory compilation matches dotnet build behaviour.
     /// </summary>
     public (bool Success, string[] Errors) Compile(string sourceCode)
     {
         var syntaxTree = CSharpSyntaxTree.ParseText(sourceCode);
 
+        // Prepend a global-usings syntax tree so in-memory compilation aligns with
+        // dotnet build (ImplicitUsings=enable + project GlobalUsings.g.cs).
+        var trees = new List<SyntaxTree> { syntaxTree };
+        if (_globalUsings.Length > 0)
+        {
+            var globalUsingsSource = string.Join("\n", _globalUsings);
+            trees.Insert(0, CSharpSyntaxTree.ParseText(globalUsingsSource));
+        }
+
         var compilation = CSharpCompilation.Create(
             assemblyName: $"JiTTest_{Guid.NewGuid():N}",
-            syntaxTrees: [syntaxTree],
+            syntaxTrees: trees,
             references: _references,
             options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 

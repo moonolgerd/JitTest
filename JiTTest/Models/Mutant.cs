@@ -51,10 +51,10 @@ public class Mutant
         get
         {
             if (ContainingMember is null) return "";
-            if (ContainingMemberIsPublic) return $"The code is inside PUBLIC method '{ContainingMember}' — you can call it directly.";
-            if (ContainingMemberIsProtected) return $"The code is inside PROTECTED method '{ContainingMember}' — you CANNOT call it directly. Test it indirectly via public properties, static data, or by testing the observable side effects.";
-            if (ContainingMemberIsPrivate) return $"The code is inside PRIVATE method '{ContainingMember}' — you CANNOT call it directly. Test it indirectly via a public method that invokes it, or test the data it reads/writes.";
-            return $"The code is inside '{ContainingMember}' — check its accessibility before calling it.";
+            if (ContainingMemberIsPublic) return $"The code is inside PUBLIC member '{ContainingMember}' — you can call it directly.";
+            if (ContainingMemberIsProtected) return $"The code is inside PROTECTED member '{ContainingMember}' — you CANNOT call it directly. Test it indirectly via public properties, static data, or by testing the observable side effects.";
+            if (ContainingMemberIsPrivate) return $"The code is inside PRIVATE member '{ContainingMember}' — you CANNOT call it directly. Do NOT reference this field or method by name in the test. Test indirectly via a public method that invokes it, or test the observable side effects (return values, state changes, thrown exceptions).";
+            return $"The code is inside '{ContainingMember}' — check its accessibility before calling it directly.";
         }
     }
 }

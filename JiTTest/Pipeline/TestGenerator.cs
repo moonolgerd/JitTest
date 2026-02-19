@@ -17,13 +17,29 @@ public class TestGenerator(IChatClient chatClient, RoslynCompiler compiler, JiTT
         
         // Extract using directives from the original source file
         var sourceUsings = RoslynCompiler.ExtractUsingDirectives(originalFileContent);
-        
-        var messages = PromptTemplates.GetTestGenerationPrompt(mutant, originalFileContent, sourceUsings);
+
+        // Automatically inject the source file's namespace as a required using so the LLM
+        // always includes it (e.g. "using MyProject.Models;" when testing WeatherForecast.cs)
+        var sourceNamespace = RoslynCompiler.ExtractNamespace(originalFileContent);
+        if (!string.IsNullOrEmpty(sourceNamespace))
+        {
+            var namespaceUsing = $"using {sourceNamespace};";
+            if (!sourceUsings.Any(u => u.Equals(namespaceUsing, StringComparison.OrdinalIgnoreCase)))
+                sourceUsings.Insert(0, namespaceUsing);
+        }
+
+        var globalUsings = compiler.GlobalUsingNamespaces;
+        var messages = PromptTemplates.GetTestGenerationPrompt(mutant, originalFileContent, sourceUsings, globalUsings);
 
         if (config.Verbose)
         {
             Console.ForegroundColor = ConsoleColor.DarkGray;
             Console.WriteLine($"[TestGen] Generating test for mutant {mutant.Id}...");
+            if (sourceNamespace is not null)
+            {
+                Console.ForegroundColor = ConsoleColor.DarkCyan;
+                Console.WriteLine($"[TestGen] Source namespace: {sourceNamespace}");
+            }
             if (sourceUsings.Count > 0)
             {
                 Console.ForegroundColor = ConsoleColor.DarkCyan;
@@ -82,7 +98,25 @@ public class TestGenerator(IChatClient chatClient, RoslynCompiler compiler, JiTT
                 Console.ResetColor();
             }
 
-            var fixMessages = PromptTemplates.GetCompilationFixPrompt(testCode, errors);
+            // On the final retry, escalate: regenerate from scratch with prior error context
+            // rather than asking the fixer to patch an already-broken file.
+            List<ChatMessage> fixMessages;
+            if (retry == config.MaxRetries - 1 && config.MaxRetries > 1)
+            {
+                var priorErrors = string.Join(", ", errors.Take(3).Select(e => e.Split('(')[0].Trim()));
+                var escalationHint = $"Your previous attempt failed to compile ({priorErrors}). " +
+                    "Rewrite the test from scratch using only public API. " +
+                    (string.IsNullOrEmpty(mutant.AccessibilityHint) ? "" : mutant.AccessibilityHint + " ") +
+                    "Return ONLY complete C# code with no markdown fences.";
+                var escalatedMessages = PromptTemplates.GetTestGenerationPrompt(
+                    mutant, originalFileContent, sourceUsings, globalUsings);
+                escalatedMessages.Add(new(Microsoft.Extensions.AI.ChatRole.User, escalationHint));
+                fixMessages = escalatedMessages;
+            }
+            else
+            {
+                fixMessages = PromptTemplates.GetCompilationFixPrompt(testCode, errors, mutant);
+            }
             response = await chatClient.GetResponseAsync(fixMessages);
             testCode = LlmResponseParser.ExtractCSharpCode(response.Text ?? "");
 

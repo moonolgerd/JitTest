@@ -132,14 +132,28 @@ public static class PromptTemplates
         ];
     }
 
-    public static List<ChatMessage> GetTestGenerationPrompt(Mutant mutant, string originalFileContent, List<string>? sourceUsings = null)
+    public static List<ChatMessage> GetTestGenerationPrompt(Mutant mutant, string originalFileContent, List<string>? sourceUsings = null, IReadOnlyList<string>? globalUsings = null)
     {
         var usingsSection = sourceUsings?.Count > 0
             ? $"""
                 
                 ## Required Using Directives from Source File
-                The original source file includes these using directives. Your test MUST include these:
+                The original source file uses the following namespaces — your test MUST include these using directives:
                 {string.Join("\n", sourceUsings)}
+
+                """
+            : "";
+
+        // Tell the LLM which namespaces are already globally in scope so it doesn't waste
+        // a using slot on something that's already implicit, and doesn't get confused about
+        // whether to include it.
+        var globalUsingsSection = globalUsings?.Count > 0
+            ? $"""
+
+                ## Globally Available Namespaces (NO explicit using needed for these)
+                The test project has ImplicitUsings enabled. The following namespaces are already in global scope — you do NOT need to add using directives for them:
+                {string.Join("\n", globalUsings.Select(ns => $"  // {ns}"))}
+                You only need explicit using directives for namespaces NOT in this list (e.g. project-specific namespaces, NSubstitute, logging abstractions).
 
                 """
             : "";
@@ -273,7 +287,7 @@ public static class PromptTemplates
                 File: {mutant.TargetFile}
                 Original code: {mutant.OriginalCode}
                 Mutated code: {mutant.MutatedCode}
-                {(string.IsNullOrEmpty(mutant.AccessibilityHint) ? "" : $"\n## ACCESSIBILITY WARNING\n{mutant.AccessibilityHint}\n")}{usingsSection}
+                {(string.IsNullOrEmpty(mutant.AccessibilityHint) ? "" : $"\n## ACCESSIBILITY WARNING\n{mutant.AccessibilityHint}\n")}{globalUsingsSection}{usingsSection}
                 ## Original file content
                 {originalFileContent}
 
@@ -283,20 +297,31 @@ public static class PromptTemplates
         ];
     }
 
-    public static List<ChatMessage> GetCompilationFixPrompt(string testCode, string[] errors)
+    public static List<ChatMessage> GetCompilationFixPrompt(string testCode, string[] errors, Mutant? mutant = null)
     {
         var errorList = string.Join("\n", errors.Select(e => $"  - {e}"));
+        var mutantContext = mutant is null ? "" : $"""
+
+                ## Mutant being tested (do NOT lose this context when rewriting)
+                Original code : {mutant.OriginalCode}
+                Mutated code  : {mutant.MutatedCode}
+                {(string.IsNullOrEmpty(mutant.AccessibilityHint) ? "" : $"⚠️ {mutant.AccessibilityHint}")}
+                """;
 
         return
         [
-            new(ChatRole.System, """
+            new(ChatRole.System, $"""
                 You are a C# compilation error fixer. The following test code has compilation errors.
                 Fix the errors and return the complete corrected C# file.
-                
+
                 Available frameworks: xUnit 2.9, NSubstitute 5.3, Microsoft.Extensions.Logging.Abstractions.
                 Use NSubstitute (Substitute.For<T>()) for interface mocking.
                 Use NullLogger<T>.Instance for ILogger dependencies.
                 Do NOT use Moq or any other mocking library.
+
+                ⚠️ NEVER replace real assertions with Assert.True(true), Assert.NotNull(null), or any other
+                vacuous placeholder. If you cannot fix the original assertion, rewrite the test to
+                catch the same behavioral difference through a different public API or observable side effect.
 
                 COMMON FIXES:
                 - CS0246 "type or namespace name 'X' could not be found" → Missing using directive.
@@ -305,23 +330,23 @@ public static class PromptTemplates
                   These are internal Dapr types. DO NOT try to instantiate them.
                   Use NSubstitute.For<IActorStateManager>() to mock state operations instead.
                   Do NOT access .StateManager property on actors — it's not public.
-                - CS1061 "does not contain a definition for 'X'" → The method is probably private.
-                  REMOVE the call entirely and rewrite the test to use only public API.
-                  Do NOT just rename the method — it does not exist publicly.
-                - CS0122 "inaccessible due to its protection level" → The method is protected/private.
+                - CS1061 "does not contain a definition for 'X'" → The method/field is probably private.
+                  REMOVE the direct access entirely and rewrite to use only public API.
+                  Do NOT just rename the identifier — it does not exist publicly.
+                - CS0122 "inaccessible due to its protection level" → The member is protected/private.
                   REMOVE the call entirely and test via observable public outcomes.
                 - CS0198 "static readonly field cannot be assigned" → Remove the assignment.
                   Read from the field instead of writing to it.
                 - CS1929 "does not contain a definition for 'Contains'" with MemoryExtensions →
                   Use .ToList().Contains() or .AsEnumerable().Contains() instead.
-                - CS0117 "does not contain a definition for 'X'" → The field/property is private.
-                  Do NOT access private static fields.
+                - CS0117 "does not contain a definition for 'X'" → The field/property is private or does not exist.
+                  Do NOT access private static fields by name. Exercise behavior via public methods.
                 - CS1674 "type used in a using statement must implement IDisposable" → 
                   Remove the `using` keyword. The type is not disposable.
                 - CS1501 "No overload for method 'Is' takes N arguments" →
                   NSubstitute `Arg.Is<T>()` takes a single predicate: `Arg.Is<T>(x => condition)`.
                   Do NOT pass multiple arguments. For exact match use `Arg.Is<T>(value)`.
-                
+
                 Respond ONLY with the corrected C# code. No markdown fences, no explanation.
                 """),
             new(ChatRole.User, $"""
@@ -329,7 +354,7 @@ public static class PromptTemplates
                 {testCode}
 
                 ## Compilation errors
-                {errorList}
+                {errorList}{mutantContext}
 
                 Fix all compilation errors and return the complete corrected file.
                 """)

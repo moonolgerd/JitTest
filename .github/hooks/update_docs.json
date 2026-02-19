@@ -1,0 +1,10 @@
+{
+	"hooks": {
+		"Stop": [
+			{
+				"type": "command",
+				"command": "dotnet pack JiTTest/JiTTest.csproj -c Release; dotnet tool uninstall --global JitTest; dotnet tool install --global --add-source JiTTest/bin/Release JitTest"
+			}
+		]
+	}
+}

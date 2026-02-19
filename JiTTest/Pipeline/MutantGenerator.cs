@@ -98,20 +98,75 @@ public class MutantGenerator(IChatClient chatClient, JiTTestConfig config)
         var normalizedOriginal = NormalizeWhitespace(mutant.OriginalCode);
         var normalizedFile = NormalizeWhitespace(targetFile.FullFileContent);
 
-        return normalizedFile.Contains(normalizedOriginal);
+        if (!normalizedFile.Contains(normalizedOriginal))
+            return false;
+
+        // Align OriginalCode to the verbatim text found in the file so TestExecutor's
+        // string.Replace can find it (the LLM may have used different indentation).
+        var verbatim = ExtractVerbatimMatch(targetFile.FullFileContent, mutant.OriginalCode);
+        if (verbatim is not null)
+            mutant.OriginalCode = verbatim;
+
+        return true;
     }
 
     /// <summary>
     /// Normalize whitespace for more forgiving code comparison.
-    /// Collapses runs of whitespace to single spaces, but preserves overall structure.
+    /// Normalizes each line independently (trim + collapse internal whitespace), then
+    /// joins with spaces. This avoids cross-line false-positives like "&lt; -5" vs "&lt;-5"
+    /// while still tolerating CRLF and indentation differences.
     /// </summary>
     private static string NormalizeWhitespace(string code)
     {
-        return System.Text.RegularExpressions.Regex.Replace(
-            code.Trim(),
-            @"\s+",
-            " "
-        );
+        var lines = code.Split('\n');
+        var normalized = lines
+            .Select(l => System.Text.RegularExpressions.Regex.Replace(l.Trim().TrimEnd('\r'), @"\s+", " "))
+            .Where(l => l.Length > 0);
+        return string.Join(" ", normalized);
+    }
+
+    /// <summary>
+    /// Slide a line-count window over <paramref name="fileContent"/> to find the verbatim
+    /// text whose normalized form equals the normalized <paramref name="originalCode"/>.
+    /// Returns the verbatim span on success, or null if no window matches.
+    /// </summary>
+    private static string? ExtractVerbatimMatch(string fileContent, string originalCode)
+    {
+        var normalizedOriginal = NormalizeWhitespace(originalCode);
+        var fileLines = fileContent.Split('\n');
+        var lineCount = originalCode.Split('\n').Length;
+
+        for (var i = 0; i <= fileLines.Length - lineCount; i++) // <= correct: last valid start is Length-lineCount
+        {
+            var candidate = string.Join("\n", fileLines.Skip(i).Take(lineCount));
+            if (NormalizeWhitespace(candidate) == normalizedOriginal)
+                return candidate;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Find the character offset of <paramref name="originalCode"/> in <paramref name="fileContent"/>
+    /// using normalized comparison (fallback when exact IndexOf fails due to indentation/CRLF).
+    /// </summary>
+    private static int FindNormalizedPosition(string fileContent, string originalCode)
+    {
+        var normalizedOriginal = NormalizeWhitespace(originalCode);
+        var fileLines = fileContent.Split('\n');
+        var lineCount = originalCode.Split('\n').Length;
+
+        var charOffset = 0;
+        for (var i = 0; i < fileLines.Length; i++)
+        {
+            if (i + lineCount <= fileLines.Length) // <= correct: last valid window ends at index Length-1
+            {
+                var candidate = string.Join("\n", fileLines.Skip(i).Take(lineCount));
+                if (NormalizeWhitespace(candidate) == normalizedOriginal)
+                    return charOffset;
+            }
+            charOffset += fileLines[i].Length + 1; // +1 restores the '\n' removed by Split
+        }
+        return -1;
     }
 
     /// <summary>
@@ -259,7 +314,12 @@ public class MutantGenerator(IChatClient chatClient, JiTTestConfig config)
 
             // Find the position of the originalCode in the source
             var pos = targetFile.FullFileContent.IndexOf(mutant.OriginalCode, StringComparison.Ordinal);
-            if (pos < 0) return;
+            if (pos < 0)
+            {
+                // OriginalCode may have been validated via normalized comparison — find best-effort position
+                pos = FindNormalizedPosition(targetFile.FullFileContent, mutant.OriginalCode);
+                if (pos < 0) return;
+            }
 
             // Walk up the syntax tree to find the enclosing method/property
             var node = root.FindNode(new Microsoft.CodeAnalysis.Text.TextSpan(pos, mutant.OriginalCode.Length));
@@ -287,15 +347,30 @@ public class MutantGenerator(IChatClient chatClient, JiTTestConfig config)
                     mutant.ContainingMember = prop.Identifier.Text;
                     mutant.ContainingMemberIsPublic = prop.Modifiers.Any(m =>
                         m.IsKind(SyntaxKind.PublicKeyword));
+                    mutant.ContainingMemberIsProtected = prop.Modifiers.Any(m =>
+                        m.IsKind(SyntaxKind.ProtectedKeyword));
+                    mutant.ContainingMemberIsPrivate = prop.Modifiers.Any(m =>
+                        m.IsKind(SyntaxKind.PrivateKeyword)) ||
+                        !prop.Modifiers.Any(m =>
+                            m.IsKind(SyntaxKind.PublicKeyword) ||
+                            m.IsKind(SyntaxKind.ProtectedKeyword) ||
+                            m.IsKind(SyntaxKind.InternalKeyword));
                     break;
                 }
 
-                // Static fields/collections — always publicly accessible via class name
                 if (node is FieldDeclarationSyntax field)
                 {
                     mutant.ContainingMember = field.Declaration.Variables.FirstOrDefault()?.Identifier.Text;
                     mutant.ContainingMemberIsPublic = field.Modifiers.Any(m =>
                         m.IsKind(SyntaxKind.PublicKeyword));
+                    mutant.ContainingMemberIsProtected = field.Modifiers.Any(m =>
+                        m.IsKind(SyntaxKind.ProtectedKeyword));
+                    mutant.ContainingMemberIsPrivate = field.Modifiers.Any(m =>
+                        m.IsKind(SyntaxKind.PrivateKeyword)) ||
+                        !field.Modifiers.Any(m =>
+                            m.IsKind(SyntaxKind.PublicKeyword) ||
+                            m.IsKind(SyntaxKind.ProtectedKeyword) ||
+                            m.IsKind(SyntaxKind.InternalKeyword));
                     break;
                 }
 
