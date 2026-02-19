@@ -132,11 +132,21 @@ public static class PromptTemplates
         ];
     }
 
-    public static List<ChatMessage> GetTestGenerationPrompt(Mutant mutant, string originalFileContent)
+    public static List<ChatMessage> GetTestGenerationPrompt(Mutant mutant, string originalFileContent, List<string>? sourceUsings = null)
     {
+        var usingsSection = sourceUsings?.Count > 0
+            ? $"""
+                
+                ## Required Using Directives from Source File
+                The original source file includes these using directives. Your test MUST include these:
+                {string.Join("\n", sourceUsings)}
+
+                """
+            : "";
+
         return
         [
-            new(ChatRole.System, """
+            new(ChatRole.System, $"""
                 You are an expert .NET test author. Write an xUnit test that:
                 1. PASSES against the original code
                 2. FAILS against the mutated code
@@ -161,7 +171,26 @@ public static class PromptTemplates
                   using System.Threading;                              // For CancellationToken
                   using System.Threading.Tasks;                        // For Task, async
                 Add the namespace of the code under test (e.g. using YourProject.Module;)
-                If the code uses Dapr: using Dapr.Client;
+                If the code uses Dapr: using Dapr.Client; or using Dapr.Actors.Runtime;
+
+                ═══ DAPR ACTORS — SPECIAL RULES ═══
+                - Dapr Actor classes inherit from 'Actor' base class
+                - ActorStateManager is INTERNAL — you CANNOT instantiate or mock it directly
+                - ActorHost is an internal implementation detail — do NOT use it in tests
+                - To test Actor methods that use state:
+                  1. Create a mock IActorStateManager using NSubstitute.For<IActorStateManager>()
+                  2. Mock the state operations (.GetStateAsync, .SetStateAsync, .GetOrAddStateAsync)
+                  3. Pass the mock to the Actor constructor if it accepts one, OR
+                  4. Test higher-level public methods that internally use state
+                - Actor constructors typically take ActorHost parameter — mock it with NSubstitute
+                - NEVER try to access .StateManager property — it's internal/protected
+                - NEVER try to instantiate ActorStateManager or ActorHost directly
+
+                Example for testing a Dapr Actor:
+                  var actorHost = Substitute.For<ActorHost>();  // Mock the host
+                  var actor = new MyActor(actorHost);           // Create the actor instance
+                  var result = await actor.PublicMethodAsync(); // Test public methods only
+                  Assert.Equal(expected, result);
 
                 ═══ ACCESSIBILITY RULES — MUST FOLLOW ═══
                 - You can ONLY call public methods and access public properties/fields
@@ -176,10 +205,10 @@ public static class PromptTemplates
                 EXAMPLES OF ERRORS TO AVOID:
                 ✗ svc.GetTimeZone("Berlin")         — GetTimeZone is private, will NOT compile
                 ✗ svc.ExecuteAsync(token)            — ExecuteAsync is protected, will NOT compile
-                ✗ Summary = new[] { ... }            — static readonly field, cannot assign
+                ✗ Summary = new string[] initialization — static readonly field, cannot assign
                 ✓ SharedCollections.Cities.Contains(x) — public static property, OK
-                ✓ new WeatherForecast { City = "X" }  — public property, OK
-                ✓ WeatherUtilities.GetSummary(...)     — public static method, OK
+                ✓ new WeatherForecast() with City set  — public property OK via object initializer
+                ✓ WeatherUtilities.GetSummary(temp)    — public static method, OK
 
                 ═══ COMPILATION RULES ═══
                 - Use explicit types, not 'var' for ambiguous types
@@ -195,9 +224,10 @@ public static class PromptTemplates
                 For computed properties (like TemperatureF), REPLICATE THE EXACT FORMULA
                 in your test as the expected value — do NOT try to pre-compute the result.
                 
-                Example for `public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);`:
-                  var forecast = new WeatherForecast { TemperatureC = 25 };
-                  int expected = 32 + (int)(25 / 0.5556);  // replicate the formula!
+                Example for computed property TemperatureF:
+                  var forecast = new WeatherForecast();
+                  forecast.TemperatureC = 25;
+                  int expected = 32 + (int)(25 / 0.5556);  // replicate the formula from TemperatureF
                   Assert.Equal(expected, forecast.TemperatureF);
                 
                 This way the test always matches the original code and only breaks when
@@ -243,7 +273,7 @@ public static class PromptTemplates
                 File: {mutant.TargetFile}
                 Original code: {mutant.OriginalCode}
                 Mutated code: {mutant.MutatedCode}
-                {(string.IsNullOrEmpty(mutant.AccessibilityHint) ? "" : $"\n## ACCESSIBILITY WARNING\n{mutant.AccessibilityHint}\n")}
+                {(string.IsNullOrEmpty(mutant.AccessibilityHint) ? "" : $"\n## ACCESSIBILITY WARNING\n{mutant.AccessibilityHint}\n")}{usingsSection}
                 ## Original file content
                 {originalFileContent}
 
@@ -269,6 +299,12 @@ public static class PromptTemplates
                 Do NOT use Moq or any other mocking library.
 
                 COMMON FIXES:
+                - CS0246 "type or namespace name 'X' could not be found" → Missing using directive.
+                  Check if the type comes from a project namespace and add the appropriate using.
+                - CS0122 "inaccessible due to its protection level" with ActorStateManager/ActorHost →
+                  These are internal Dapr types. DO NOT try to instantiate them.
+                  Use NSubstitute.For<IActorStateManager>() to mock state operations instead.
+                  Do NOT access .StateManager property on actors — it's not public.
                 - CS1061 "does not contain a definition for 'X'" → The method is probably private.
                   REMOVE the call entirely and rewrite the test to use only public API.
                   Do NOT just rename the method — it does not exist publicly.

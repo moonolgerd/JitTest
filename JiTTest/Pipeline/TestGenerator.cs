@@ -14,12 +14,21 @@ public class TestGenerator(IChatClient chatClient, RoslynCompiler compiler, JiTT
     public async Task<GeneratedTest> GenerateAsync(Mutant mutant, string originalFileContent)
     {
         var result = new GeneratedTest { ForMutant = mutant };
-        var messages = PromptTemplates.GetTestGenerationPrompt(mutant, originalFileContent);
+        
+        // Extract using directives from the original source file
+        var sourceUsings = RoslynCompiler.ExtractUsingDirectives(originalFileContent);
+        
+        var messages = PromptTemplates.GetTestGenerationPrompt(mutant, originalFileContent, sourceUsings);
 
         if (config.Verbose)
         {
             Console.ForegroundColor = ConsoleColor.DarkGray;
             Console.WriteLine($"[TestGen] Generating test for mutant {mutant.Id}...");
+            if (sourceUsings.Count > 0)
+            {
+                Console.ForegroundColor = ConsoleColor.DarkCyan;
+                Console.WriteLine($"[TestGen] Extracted {sourceUsings.Count} using directive(s) from source");
+            }
             Console.ResetColor();
         }
 
@@ -41,7 +50,7 @@ public class TestGenerator(IChatClient chatClient, RoslynCompiler compiler, JiTT
         var (success, errors) = compiler.Compile(testCode);
         if (!success)
         {
-            var (fixedCode, wasFixed) = compiler.AutoFixUsings(testCode, errors);
+            var (fixedCode, wasFixed) = compiler.AutoFixUsings(testCode, errors, sourceUsings);
             if (wasFixed)
             {
                 testCode = fixedCode;
@@ -91,7 +100,7 @@ public class TestGenerator(IChatClient chatClient, RoslynCompiler compiler, JiTT
             var (retrySuccess, retryErrors) = compiler.Compile(testCode);
             if (!retrySuccess)
             {
-                var (fixedCode, wasFixed) = compiler.AutoFixUsings(testCode, retryErrors);
+                var (fixedCode, wasFixed) = compiler.AutoFixUsings(testCode, retryErrors, sourceUsings);
                 if (wasFixed)
                 {
                     testCode = fixedCode;

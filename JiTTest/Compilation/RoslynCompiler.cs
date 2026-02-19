@@ -14,6 +14,57 @@ public class RoslynCompiler
     private readonly List<MetadataReference> _references;
 
     /// <summary>
+    /// Extract all using directives from a C# source file.
+    /// Returns both standard 'using Namespace;' and 'using static Type;' directives.
+    /// </summary>
+    public static List<string> ExtractUsingDirectives(string sourceCode)
+    {
+        var usings = new List<string>();
+        if (string.IsNullOrWhiteSpace(sourceCode))
+            return usings;
+
+        var lines = sourceCode.Split('\n');
+        foreach (var line in lines)
+        {
+            var trimmed = line.TrimStart();
+            // Match: using Something; or using static Something;
+            // Stop when we hit namespace, class, or other non-using declarations
+            if (trimmed.StartsWith("using ") && !trimmed.StartsWith("using (") && !trimmed.StartsWith("using var "))
+            {
+                // Strip everything after the first semicolon so we don't keep trailing comments,
+                // e.g. "using X; // note" -> "using X;"
+                var semicolonIndex = trimmed.IndexOf(';');
+                if (semicolonIndex >= 0)
+                {
+                    var usingDirective = trimmed.Substring(0, semicolonIndex + 1).TrimEnd();
+                    usings.Add(usingDirective);
+                }
+                else
+                {
+                    // Fallback for malformed lines without a semicolon: preserve prior behavior
+                    usings.Add(trimmed.TrimEnd());
+                }
+            }
+            else if (trimmed.Length == 0 || trimmed.StartsWith("//") || trimmed.StartsWith("/*"))
+            {
+                // Allow blank lines and comments between using directives
+                continue;
+            }
+            else if (trimmed.StartsWith("namespace ") || trimmed.StartsWith("public ") ||
+                     trimmed.StartsWith("internal ") || trimmed.StartsWith("private ") ||
+                     trimmed.StartsWith("[assembly") ||
+                     (trimmed.Length > 0 && !trimmed.StartsWith("using ")))
+            {
+                // Stop at first declaration or other non-using code after usings block
+                if (usings.Count > 0)
+                    break;
+            }
+        }
+
+        return usings.Distinct().ToList();
+    }
+
+    /// <summary>
     /// Maps type/identifier names (from CS0103/CS0246 errors) to the using directive they need.
     /// </summary>
     private static readonly Dictionary<string, string> s_usingMap = new(StringComparer.OrdinalIgnoreCase)
@@ -28,6 +79,11 @@ public class RoslynCompiler
         ["ILoggerFactory"] = "using Microsoft.Extensions.Logging;",
         ["LogLevel"] = "using Microsoft.Extensions.Logging;",
         ["DaprClient"] = "using Dapr.Client;",
+        ["ActorHost"] = "using Dapr.Actors.Runtime;",
+        ["ActorStateManager"] = "using Dapr.Actors.Runtime;",
+        ["Actor"] = "using Dapr.Actors.Runtime;",
+        ["IActor"] = "using Dapr.Actors;",
+        ["ActorId"] = "using Dapr.Actors;",
         ["IServiceCollection"] = "using Microsoft.Extensions.DependencyInjection;",
         ["IServiceProvider"] = "using Microsoft.Extensions.DependencyInjection;",
         ["IHost"] = "using Microsoft.Extensions.Hosting;",
@@ -95,10 +151,43 @@ public class RoslynCompiler
     /// Attempt to auto-fix missing using directives based on CS0103/CS0246 errors.
     /// Returns the (possibly patched) source code and whether any fixes were applied.
     /// </summary>
-    public (string FixedCode, bool WasFixed) AutoFixUsings(string sourceCode, string[] errors)
+    /// <param name="sourceCode">The test code to fix</param>
+    /// <param name="errors">Compilation errors</param>
+    /// <param name="sourceUsings">Optional: Using directives from the original source file being tested</param>
+    public (string FixedCode, bool WasFixed) AutoFixUsings(string sourceCode, string[] errors, List<string>? sourceUsings = null)
     {
         var missingUsings = new HashSet<string>();
         var codeModified = false;
+
+        // First, add any source usings that are missing from the test code
+        if (sourceUsings?.Count > 0)
+        {
+            foreach (var sourceUsing in sourceUsings)
+            {
+                // Build a comparison key without trailing comments or semicolon.
+                var comparison = sourceUsing;
+
+                // Strip trailing line comments.
+                var commentIndex = comparison.IndexOf("//", StringComparison.Ordinal);
+                if (commentIndex >= 0)
+                    comparison = comparison.Substring(0, commentIndex);
+
+                // Remove trailing whitespace and any trailing semicolon for comparison.
+                comparison = comparison.TrimEnd();
+                if (comparison.EndsWith(";", StringComparison.Ordinal))
+                    comparison = comparison.TrimEnd(';').TrimEnd();
+
+                if (comparison.Length == 0)
+                    continue;
+
+                if (!sourceCode.Contains(comparison, StringComparison.OrdinalIgnoreCase))
+                {
+                    // Emit a canonical using line: "using ...;"
+                    var canonicalUsing = comparison + ";";
+                    missingUsings.Add(canonicalUsing);
+                }
+            }
+        }
 
         foreach (var error in errors)
         {
