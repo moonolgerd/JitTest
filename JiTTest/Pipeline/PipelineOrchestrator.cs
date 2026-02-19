@@ -188,6 +188,7 @@ public class PipelineOrchestrator(JiTTestConfig config)
         PrintStage("Stage 5/6", $"Executing tests (original → mutated)... (parallelism: {parallelism})");
         var testExecutor = new TestExecutor(config);
         var candidateCatches = new ConcurrentBag<ExecutionResult>();
+        var failedOnOriginal = new ConcurrentBag<ExecutionResult>();
 
         await Parallel.ForEachAsync(compiledTests,
             new ParallelOptions { MaxDegreeOfParallelism = parallelism },
@@ -196,7 +197,49 @@ public class PipelineOrchestrator(JiTTestConfig config)
                 var result = await testExecutor.ExecuteAsync(test);
                 if (result.IsCandidateCatch)
                     candidateCatches.Add(result);
+                else if (!result.PassesOnOriginal)
+                    failedOnOriginal.Add(result);
             });
+
+        // ── Stage 5b: Recover tests that failed on original code ────
+        var failedList = failedOnOriginal.ToList();
+        if (failedList.Count > 0)
+        {
+            Console.WriteLine($"  {failedList.Count} test(s) failed on original — attempting recovery re-generation...");
+            foreach (var failed in failedList)
+            {
+                var sourceContent = changeSet.Files
+                    .FirstOrDefault(f => f.FilePath.EndsWith(
+                        failed.GeneratedTest.ForMutant.TargetFile,
+                        StringComparison.OrdinalIgnoreCase))
+                    ?.FullFileContent ?? "";
+
+                var regenTest = await testGenerator.RegenerateAfterOriginalFailureAsync(
+                    failed.GeneratedTest, sourceContent, failed.OriginalOutput ?? "");
+
+                if (!regenTest.CompilationSuccess)
+                {
+                    if (config.Verbose)
+                    {
+                        Console.ForegroundColor = ConsoleColor.Yellow;
+                        Console.WriteLine($"  ↩ Recovery compile failed for {failed.GeneratedTest.ForMutant.Id} — skipping");
+                        Console.ResetColor();
+                    }
+                    continue;
+                }
+
+                var reResult = await testExecutor.ExecuteAsync(regenTest);
+                if (reResult.IsCandidateCatch)
+                    candidateCatches.Add(reResult);
+                else if (config.Verbose)
+                {
+                    Console.ForegroundColor = ConsoleColor.DarkYellow;
+                    Console.WriteLine($"  ↩ Recovery test for {failed.GeneratedTest.ForMutant.Id}: " +
+                        $"passes original={reResult.PassesOnOriginal}, fails mutant={reResult.FailsOnMutant}");
+                    Console.ResetColor();
+                }
+            }
+        }
 
         var candidateList = candidateCatches.ToList();
         Console.WriteLine($"  {candidateList.Count} candidate catch(es) from {compiledTests.Count} test(s).");

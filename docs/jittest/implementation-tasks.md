@@ -294,3 +294,85 @@
 - **Acceptance**: Timing summary printed after every pipeline run
 
 ---
+
+## Phase 8: Code Generation Quality (v1.6.6, Completed)
+
+### Task 8.1: Fix accessibility annotation for fields and properties
+
+- [x] `AnnotateAccessibility()` previously only checked method declarations; now handles `FieldDeclarationSyntax` and `PropertyDeclarationSyntax` correctly
+- [x] `ContainingMemberIsPublic/Protected/Private` flags set accurately for all member kinds
+- **Acceptance**: Private fields no longer pass through as "public"; accessibility-based filtering works correctly
+
+### Task 8.2: Improve AccessibilityHint wording
+
+- [x] `AccessibilityHint` property in `Mutant.cs` says "member" instead of "method" (correct for fields/properties)
+- [x] PRIVATE hint now reads: "Do NOT reference this field or method by name from the test — test its behaviour indirectly via the public API"
+- **Acceptance**: Test generator prompt accurately reflects the mutated member's visibility
+
+### Task 8.3: Per-line NormalizeWhitespace
+
+- [x] `NormalizeWhitespace()` now normalizes each line independently before joining
+- [x] Prevents cross-line false positives such as `< -5` (two tokens across line boundary) vs `<-5` (single token)
+- **Acceptance**: Whitespace-only or indentation-only diffs do not generate false-positive mutant matches
+
+### Task 8.4: Inject mutant context into compilation fix prompt
+
+- [x] `GetCompilationFixPrompt()` accepts optional `Mutant? mutant` parameter
+- [x] When provided, appends the mutant's `AccessibilityHint` to the fix system prompt so the LLM avoids re-introducing the same accessibility error
+- [x] `TestGenerator` passes the mutant to every fix-prompt call
+- **Acceptance**: Compilation retry success rate improves; fewer repeated CS0122/CS0122 errors on retry
+
+### Task 8.5: Final retry escalation + Assert.True(true) ban
+
+- [x] On the last retry, `TestGenerator` escalates to a **full regeneration** prompt (re-sends `GetTestGenerationPrompt`) rather than patching the same broken code
+- [x] Escalation hint includes a concise summary of prior compilation errors to guide the rewrite
+- [x] `GetCompilationFixPrompt` explicitly bans `Assert.True(true)` placeholders
+- **Acceptance**: Final retry generates fresh test instead of repeatedly patching; vacuous placeholder tests no longer appear
+
+---
+
+## Phase 9: Pipeline Quality Improvements (v1.6.7, Completed)
+
+### Task 9.1: Semantic equivalence detection
+
+- [x] Added `NormalizeNumericLiterals(string code)` to `MutantGenerator.cs`:
+  - Removes digit separators (`1_000` → `1000`)
+  - Strips type suffixes (`0m`, `1L`, `2.5f`, `3UL` → bare literals)
+  - Removes redundant `.0` (`1.0` → `1`, `0.0` → `0`)
+- [x] Added `IsSemanticallEquivalent(string original, string mutated)` — normalizes both sides and compares
+- [x] `ValidateMutant()` rejects mutants that are semantically equivalent early (before LLM test generation)
+- [x] `GetValidationFailureReason()` returns a specific message for semantic equivalence rejections
+- **Acceptance**: Mutants like `0` → `0.0m` or `1_000` → `1000` are silently discarded before stage 4; verbose output shows informative rejection reason
+
+### Task 9.2: Fails-on-original recovery prompt
+
+- [x] Added `GetTestRegenFromOriginalFailurePrompt(Mutant, originalFileContent, priorTestCode, failureOutput, sourceUsings, globalUsings)` to `PromptTemplates.cs`
+- [x] System prompt explains the test **compiles but fails on original**; instructs the LLM to correct assertion logic using the failure output as ground truth
+- [x] Passes full source file, prior test code, and xUnit failure output so the LLM can reason about actual runtime behaviour
+- **Acceptance**: Prompt produces a corrected test that passes on original and fails on the mutation
+
+### Task 9.3: TestGenerator.RegenerateAfterOriginalFailureAsync
+
+- [x] New public method on `TestGenerator` accepts the failed `GeneratedTest`, original file content, and xUnit failure output
+- [x] Calls `GetTestRegenFromOriginalFailurePrompt`, extracts code, compiles, auto-fixes usings, and applies one fix-retry if still broken
+- [x] Verbose logging uses `↩` prefix to distinguish recovery regeneration from normal generation
+- **Acceptance**: Method returns a new `GeneratedTest`; if it compiles, it is re-executed by the orchestrator
+
+### Task 9.4: Recovery pass in PipelineOrchestrator (Stage 5b)
+
+- [x] Stage 5 parallel loop now also collects results where `!PassesOnOriginal` into `failedOnOriginal` bag
+- [x] After the main parallel execution loop, a **sequential recovery pass** iterates `failedOnOriginal`:
+  - Looks up the source file content from `changeSet`
+  - Calls `testGenerator.RegenerateAfterOriginalFailureAsync()`
+  - Re-executes the recovered test via `testExecutor.ExecuteAsync()`
+  - Adds to `candidateCatches` if it becomes a catch
+- [x] Verbose output reports per-test recovery outcome (`passes original`, `fails mutant`)
+- **Acceptance**: Tests that previously failed on original are given one recovery attempt; successful recoveries flow through stage 6 assessment
+
+### Task 9.5: BankingSample demonstration project
+
+- [x] Created `samples/BankingSample/` class library (`BankAccount.cs`, `LoanCalculator.cs`, `Transaction.cs`)
+- [x] Created `samples/BankingSample.Tests/` xUnit project with 28 deliberately incomplete tests (boundary gaps left for JiTTest to find)
+- [x] Both projects added to `JitTest.slnx`
+- [x] Created `jittest-config.sample.json` scoped to the sample project's source files only
+- **Acceptance**: `jittest --config jittest-config.sample.json --diff-source uncommitted` finds catches in the sample project; `dotnet test` on the tests project passes cleanly

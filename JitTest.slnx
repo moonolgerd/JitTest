@@ -1,3 +1,5 @@
 <Solution>
   <Project Path="JiTTest/JiTTest.csproj" />
+  <Project Path="samples/BankingSample/BankingSample.csproj" />
+  <Project Path="samples/BankingSample.Tests/BankingSample.Tests.csproj" />
 </Solution>

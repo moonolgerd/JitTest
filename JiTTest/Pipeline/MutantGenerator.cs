@@ -82,6 +82,8 @@ public class MutantGenerator(IChatClient chatClient, JiTTestConfig config)
         if (string.IsNullOrEmpty(mutant.OriginalCode)) return false;
         if (string.IsNullOrEmpty(mutant.MutatedCode)) return false;
         if (mutant.OriginalCode == mutant.MutatedCode) return false;
+        // Reject semantically equivalent mutations (e.g. 0 vs 0.0m, 1_000 vs 1000)
+        if (IsSemanticallEquivalent(mutant.OriginalCode, mutant.MutatedCode)) return false;
 
         var targetFile = changeSet.Files.FirstOrDefault(f =>
             f.FilePath.Equals(mutant.TargetFile, StringComparison.OrdinalIgnoreCase) ||
@@ -108,6 +110,33 @@ public class MutantGenerator(IChatClient chatClient, JiTTestConfig config)
             mutant.OriginalCode = verbatim;
 
         return true;
+    }
+
+    /// <summary>
+    /// Strip numeric literal decorations so semantically equivalent forms compare equal:
+    /// type suffixes (m/M/d/D/f/F/u/U/l/L and combinations), digit separators, and
+    /// trailing .0 on whole-number decimals (e.g. 0.0 → 0, 1.50 → 1.5).
+    /// </summary>
+    private static string NormalizeNumericLiterals(string code)
+    {
+        // Remove digit separators: 1_000_000 → 1000000
+        code = System.Text.RegularExpressions.Regex.Replace(code, @"(\d)_(\d)", "$1$2");
+        // Strip type suffixes (including combos like UL, ul, Lu): 0m → 0, 1L → 1, 2.5f → 2.5
+        code = System.Text.RegularExpressions.Regex.Replace(code, @"\b(\d+(?:\.\d+)?)[mMdDfFuUlL]+\b", "$1");
+        // Remove redundant trailing .0 from whole numbers: 1.0 → 1, 0.0 → 0
+        code = System.Text.RegularExpressions.Regex.Replace(code, @"\b(\d+)\.0\b", "$1");
+        return code;
+    }
+
+    /// <summary>
+    /// Returns true when <paramref name="original"/> and <paramref name="mutated"/> are
+    /// semantically equivalent after normalizing whitespace and numeric literal forms.
+    /// </summary>
+    private static bool IsSemanticallEquivalent(string original, string mutated)
+    {
+        var normOrig = NormalizeNumericLiterals(NormalizeWhitespace(original));
+        var normMut  = NormalizeNumericLiterals(NormalizeWhitespace(mutated));
+        return normOrig == normMut;
     }
 
     /// <summary>
@@ -182,6 +211,9 @@ public class MutantGenerator(IChatClient chatClient, JiTTestConfig config)
 
         if (mutant.OriginalCode == mutant.MutatedCode)
             return "originalCode and mutatedCode are identical";
+
+        if (IsSemanticallEquivalent(mutant.OriginalCode, mutant.MutatedCode))
+            return "originalCode and mutatedCode are semantically equivalent (differ only in numeric literal form)";
 
         var targetFile = changeSet.Files.FirstOrDefault(f =>
             f.FilePath.Equals(mutant.TargetFile, StringComparison.OrdinalIgnoreCase) ||

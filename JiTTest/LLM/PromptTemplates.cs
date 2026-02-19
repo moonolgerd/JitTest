@@ -418,6 +418,83 @@ public static class PromptTemplates
         ];
     }
 
+    /// <summary>
+    /// Build a prompt that asks the LLM to rewrite a test that already compiles but
+    /// FAILS on the original (unmodified) code. The failure output gives the LLM the
+    /// ground truth about what the original code actually does.
+    /// </summary>
+    public static List<ChatMessage> GetTestRegenFromOriginalFailurePrompt(
+        Mutant mutant,
+        string originalFileContent,
+        string priorTestCode,
+        string failureOutput,
+        List<string>? sourceUsings = null,
+        IReadOnlyList<string>? globalUsings = null)
+    {
+        var usingsBlock = sourceUsings?.Count > 0
+            ? string.Join("\n", sourceUsings)
+            : "(none detected)";
+
+        var globalUsingsBlock = globalUsings?.Count > 0
+            ? string.Join("\n", globalUsings.Select(u => $"using {u};"))
+            : "(none)";
+
+        var accessibilityHint = string.IsNullOrEmpty(mutant.AccessibilityHint)
+            ? ""
+            : $"\n⚠️ ACCESSIBILITY: {mutant.AccessibilityHint}";
+
+        return
+        [
+            new(ChatRole.System, """
+                You are an expert .NET / xUnit test author. The test you previously generated
+                COMPILES SUCCESSFULLY but FAILS when run against the ORIGINAL (unmodified) code.
+                This means the test has a logic error — it asserts something the original code
+                does NOT do, or it asserts the *wrong* value.
+
+                Your task: rewrite the test so it:
+                1. PASSES on the original code shown below
+                2. FAILS when the specific mutation listed below is applied
+
+                The failure output tells you exactly what the original code actually does.
+                Use that information to correct the assertion.
+
+                Rules:
+                - Write EXACTLY ONE [Fact] test method.
+                - Include all required using directives at the top of the file.
+                - ⚠️ NEVER use Assert.True(true) — every assertion must be meaningful.
+                - Do NOT change the mutation; catch it with a correct assertion instead.
+                - Respond ONLY with the complete C# file. No markdown fences, no explanation.
+                """),
+            new(ChatRole.User, $"""
+                ## Mutation to catch
+                Mutant ID: {mutant.Id}
+                Description: {mutant.Description}
+                Original code : {mutant.OriginalCode}
+                Mutated code  : {mutant.MutatedCode}{accessibilityHint}
+
+                ## Your previous test (compiles, but FAILS on original)
+                {priorTestCode}
+
+                ## xUnit failure output when run against ORIGINAL code
+                {failureOutput}
+
+                ## Required using directives (source file)
+                {usingsBlock}
+
+                ## Global usings (project-level)
+                {globalUsingsBlock}
+
+                ## Source file (original, unmodified)
+                {originalFileContent}
+
+                ---
+                The failure output above shows what the original code ACTUALLY does.
+                Rewrite the test to match that behaviour so it passes on original and
+                fails only when the mutation is applied.
+                """)
+        ];
+    }
+
     private static string FormatDiff(ChangeSet changeSet)
     {
         var parts = new List<string>();

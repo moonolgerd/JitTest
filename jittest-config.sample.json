@@ -1,0 +1,22 @@
+{
+  "jittest-config": {
+    "ollama-endpoint": "http://localhost:11434/v1",
+    "model": "qwen3-coder:30b",
+    "diff-source": "uncommitted",
+    "mutate-targets": [
+      "samples/BankingSample/**/*.cs",
+      "samples/BankingSample/*.cs"
+    ],
+    "exclude": [
+      "samples/BankingSample.Tests/**",
+      "**/obj/**",
+      "**/bin/**"
+    ],
+    "max-mutants-per-change": 5,
+    "max-retries": 2,
+    "confidence-threshold": "MEDIUM",
+    "reporters": ["console"],
+    "temp-directory": ".jittest-temp",
+    "max-parallel": 3
+  }
+}

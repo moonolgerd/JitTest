@@ -159,4 +159,100 @@ public class TestGenerator(IChatClient chatClient, RoslynCompiler compiler, JiTT
 
         return result;
     }
+
+    /// <summary>
+    /// Re-generate a test that compiled successfully but FAILED on the original code.
+    /// Uses the failure output as additional context to correct the assertion logic.
+    /// </summary>
+    public async Task<GeneratedTest> RegenerateAfterOriginalFailureAsync(
+        GeneratedTest failedTest,
+        string originalFileContent,
+        string failureOutput)
+    {
+        var mutant = failedTest.ForMutant;
+        var result = new GeneratedTest { ForMutant = mutant };
+
+        var sourceUsings = RoslynCompiler.ExtractUsingDirectives(originalFileContent);
+        var sourceNamespace = RoslynCompiler.ExtractNamespace(originalFileContent);
+        if (!string.IsNullOrEmpty(sourceNamespace))
+        {
+            var ns = $"using {sourceNamespace};";
+            if (!sourceUsings.Any(u => u.Equals(ns, StringComparison.OrdinalIgnoreCase)))
+                sourceUsings.Insert(0, ns);
+        }
+
+        var globalUsings = compiler.GlobalUsingNamespaces;
+        var messages = PromptTemplates.GetTestRegenFromOriginalFailurePrompt(
+            mutant, originalFileContent, failedTest.TestCode, failureOutput, sourceUsings, globalUsings);
+
+        if (config.Verbose)
+        {
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine($"[TestGen] ↩ Regenerating {mutant.Id} — previous test failed on original code");
+            Console.ResetColor();
+        }
+
+        var response = await chatClient.GetResponseAsync(messages);
+        var testCode = LlmResponseParser.ExtractCSharpCode(response.Text ?? "");
+
+        if (config.Verbose)
+        {
+            Console.ForegroundColor = ConsoleColor.DarkCyan;
+            Console.WriteLine($"[TestGen] Regenerated test code for {mutant.Id}:");
+            Console.WriteLine(new string('─', 60));
+            Console.WriteLine(testCode);
+            Console.WriteLine(new string('─', 60));
+            Console.ResetColor();
+        }
+
+        // Compile; auto-fix usings; one fix-retry if still broken
+        var (success, errors) = compiler.Compile(testCode);
+        if (!success)
+        {
+            var (fixedCode, wasFixed) = compiler.AutoFixUsings(testCode, errors, sourceUsings);
+            if (wasFixed)
+            {
+                testCode = fixedCode;
+                (success, errors) = compiler.Compile(testCode);
+            }
+        }
+
+        if (!success)
+        {
+            if (config.Verbose)
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine($"[TestGen] ↩ Regen compile failed, applying one fix pass for {mutant.Id}...");
+                Console.ResetColor();
+            }
+
+            var fixMessages = PromptTemplates.GetCompilationFixPrompt(testCode, errors, mutant);
+            var fixResponse = await chatClient.GetResponseAsync(fixMessages);
+            var fixedTestCode = LlmResponseParser.ExtractCSharpCode(fixResponse.Text ?? "");
+            var (fixedSuccess, fixedErrors) = compiler.Compile(fixedTestCode);
+            if (!fixedSuccess)
+            {
+                var (autoFixed, wasFixed) = compiler.AutoFixUsings(fixedTestCode, fixedErrors, sourceUsings);
+                if (wasFixed) { fixedTestCode = autoFixed; (fixedSuccess, fixedErrors) = compiler.Compile(autoFixed); }
+            }
+            testCode = fixedTestCode;
+            success = fixedSuccess;
+            errors = fixedErrors;
+        }
+
+        result.TestCode = testCode;
+        result.CompilationSuccess = success;
+        result.CompilationErrors = [.. errors];
+        result.RetryCount = failedTest.RetryCount; // preserve original retry history
+
+        if (config.Verbose)
+        {
+            var status = success ? "✅ Compiled" : "❌ Failed";
+            Console.ForegroundColor = success ? ConsoleColor.Green : ConsoleColor.Red;
+            Console.WriteLine($"[TestGen] ↩ {status} for regen of {mutant.Id}");
+            Console.ResetColor();
+        }
+
+        return result;
+    }
 }
