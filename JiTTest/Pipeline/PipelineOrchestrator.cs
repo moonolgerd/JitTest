@@ -187,6 +187,13 @@ public class PipelineOrchestrator(JiTTestConfig config)
         stageSw = Stopwatch.StartNew();
         PrintStage("Stage 5/6", $"Executing tests (original → mutated)... (parallelism: {parallelism})");
         var testExecutor = new TestExecutor(config);
+
+        // Pre-restore the transient test project template once so every per-mutant
+        // dotnet-test execution can skip NuGet restore entirely (~3–10 s savings each).
+        Console.Write("  Pre-restoring test project template... ");
+        await testExecutor.PreRestoreTemplateAsync();
+        Console.WriteLine();
+
         var candidateCatches = new ConcurrentBag<ExecutionResult>();
         var failedOnOriginal = new ConcurrentBag<ExecutionResult>();
 
@@ -206,39 +213,47 @@ public class PipelineOrchestrator(JiTTestConfig config)
         if (failedList.Count > 0)
         {
             Console.WriteLine($"  {failedList.Count} test(s) failed on original — attempting recovery re-generation...");
-            foreach (var failed in failedList)
-            {
-                var sourceContent = changeSet.Files
-                    .FirstOrDefault(f => f.FilePath.EndsWith(
-                        failed.GeneratedTest.ForMutant.TargetFile,
-                        StringComparison.OrdinalIgnoreCase))
-                    ?.FullFileContent ?? "";
-
-                var regenTest = await testGenerator.RegenerateAfterOriginalFailureAsync(
-                    failed.GeneratedTest, sourceContent, failed.OriginalOutput ?? "");
-
-                if (!regenTest.CompilationSuccess)
+            await Parallel.ForEachAsync(failedList,
+                new ParallelOptions { MaxDegreeOfParallelism = parallelism },
+                async (failed, ct) =>
                 {
-                    if (config.Verbose)
+                    var sourceContent = changeSet.Files
+                        .FirstOrDefault(f => f.FilePath.EndsWith(
+                            failed.GeneratedTest.ForMutant.TargetFile,
+                            StringComparison.OrdinalIgnoreCase))
+                        ?.FullFileContent ?? "";
+
+                    var regenTest = await testGenerator.RegenerateAfterOriginalFailureAsync(
+                        failed.GeneratedTest, sourceContent, failed.OriginalOutput ?? "");
+
+                    if (!regenTest.CompilationSuccess)
                     {
-                        Console.ForegroundColor = ConsoleColor.Yellow;
-                        Console.WriteLine($"  ↩ Recovery compile failed for {failed.GeneratedTest.ForMutant.Id} — skipping");
-                        Console.ResetColor();
+                        if (config.Verbose)
+                        {
+                            lock (s_consoleLock)
+                            {
+                                Console.ForegroundColor = ConsoleColor.Yellow;
+                                Console.WriteLine($"  ↩ Recovery compile failed for {failed.GeneratedTest.ForMutant.Id} — skipping");
+                                Console.ResetColor();
+                            }
+                        }
+                        return;
                     }
-                    continue;
-                }
 
-                var reResult = await testExecutor.ExecuteAsync(regenTest);
-                if (reResult.IsCandidateCatch)
-                    candidateCatches.Add(reResult);
-                else if (config.Verbose)
-                {
-                    Console.ForegroundColor = ConsoleColor.DarkYellow;
-                    Console.WriteLine($"  ↩ Recovery test for {failed.GeneratedTest.ForMutant.Id}: " +
-                        $"passes original={reResult.PassesOnOriginal}, fails mutant={reResult.FailsOnMutant}");
-                    Console.ResetColor();
-                }
-            }
+                    var reResult = await testExecutor.ExecuteAsync(regenTest);
+                    if (reResult.IsCandidateCatch)
+                        candidateCatches.Add(reResult);
+                    else if (config.Verbose)
+                    {
+                        lock (s_consoleLock)
+                        {
+                            Console.ForegroundColor = ConsoleColor.DarkYellow;
+                            Console.WriteLine($"  ↩ Recovery test for {failed.GeneratedTest.ForMutant.Id}: " +
+                                $"passes original={reResult.PassesOnOriginal}, fails mutant={reResult.FailsOnMutant}");
+                            Console.ResetColor();
+                        }
+                    }
+                });
         }
 
         var candidateList = candidateCatches.ToList();
@@ -335,14 +350,17 @@ public class PipelineOrchestrator(JiTTestConfig config)
                 .Distinct()
                 .ToList();
 
-            foreach (var projectDir in projectDirs)
+            var failedBuild = 0;
+            Parallel.ForEach(projectDirs, projectDir =>
             {
+                if (Volatile.Read(ref failedBuild) != 0) return;
+
                 // Look for .csproj file
                 var csprojFiles = Directory.GetFiles(projectDir!, "*.csproj");
-                if (csprojFiles.Length == 0) continue;
+                if (csprojFiles.Length == 0) return;
 
                 var csproj = csprojFiles[0];
-                
+
                 // Build the project
                 var startInfo = new ProcessStartInfo
                 {
@@ -356,13 +374,18 @@ public class PipelineOrchestrator(JiTTestConfig config)
                 };
 
                 using var process = Process.Start(startInfo);
-                if (process == null) return false;
+                if (process is null)
+                {
+                    Interlocked.Exchange(ref failedBuild, 1);
+                    return;
+                }
 
                 process.WaitForExit(30000); // 30 second timeout
-                if (process.ExitCode != 0) return false;
-            }
+                if (process.ExitCode != 0)
+                    Interlocked.Exchange(ref failedBuild, 1);
+            });
 
-            return true;
+            return failedBuild == 0;
         }
         catch
         {

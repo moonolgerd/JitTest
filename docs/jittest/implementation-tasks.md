@@ -376,3 +376,45 @@
 - [x] Both projects added to `JitTest.slnx`
 - [x] Created `jittest-config.sample.json` scoped to the sample project's source files only
 - **Acceptance**: `jittest --config jittest-config.sample.json --diff-source uncommitted` finds catches in the sample project; `dotnet test` on the tests project passes cleanly
+
+---
+
+## Phase 10: Testing Speed Improvements (Completed)
+
+### Task 10.1: Cache `DiscoverGlobalUsings` result
+
+- [x] Added `Lazy<string[]> _cachedGlobalUsings` field to `TestExecutor`
+- [x] `WriteProjectGlobalUsings()` now reads `_cachedGlobalUsings.Value` instead of calling `RoslynCompiler.DiscoverGlobalUsings()` directly
+- [x] `Lazy<T>` with `isThreadSafe: true` ensures the repo scan runs at most once per `TestExecutor` lifetime even under full parallelism
+- **Acceptance**: Verbose output shows no duplicate "discovering global usings" filesystem scans; Stage 5 wall-clock time reduced for repos with many `GlobalUsings.g.cs` files
+
+### Task 10.2: Pre-restore transient test project template once
+
+- [x] Added `PreRestoreTemplateAsync()` to `TestExecutor` — writes an identical `.csproj` (same NuGet packages, same project filename, no `ProjectReference`) to `{tempDir}/_template/test/` and runs `dotnet restore` once
+- [x] On success, `_preRestoredObjDir` is set to the template `obj/` path
+- [x] `SetupTransientProject()` copies the pre-restored `obj/` into every transient test project directory when `_preRestoredObjDir` is set
+- [x] `ExecuteAsync()` passes `skipRestore: _preRestoredObjDir is not null` to the first `RunDotnetTest` call so both test runs use `--no-restore`
+- [x] Graceful fallback: if pre-restore fails for any reason, the pipeline continues with per-execution restore as before
+- [x] `PipelineOrchestrator` calls `testExecutor.PreRestoreTemplateAsync()` once before Stage 5's parallel loop
+- **Acceptance**: With 6 mutants, NuGet restore runs once instead of 6 times; Stage 5 wall-clock time reduced by ~3–10 s per mutant
+
+### Task 10.3: Parallelize Stage 5b recovery loop
+
+- [x] Replaced the sequential `foreach` in the Stage 5b recovery pass with `Parallel.ForEachAsync` bounded by `parallelism`
+- [x] Console output inside the lambda guarded by `lock (s_consoleLock)` to prevent interleaved output
+- [x] `candidateCatches` is already `ConcurrentBag<ExecutionResult>` — no additional synchronization needed
+- **Acceptance**: Multiple recovery LLM calls and `dotnet test` executions run concurrently; recovery pass no longer serializes after main Stage 5 parallel loop
+
+### Task 10.4: Replace `Emit()` with `GetDiagnostics()` in `RoslynCompiler.Compile()`
+
+- [x] Removed `using var ms = new MemoryStream()` and `compilation.Emit(ms)` from `RoslynCompiler.Compile()`
+- [x] Replaced with `compilation.GetDiagnostics()` — returns identical error diagnostics without allocating the full IL assembly bytes
+- [x] Eliminates unnecessary memory allocation on every compile attempt including all retry cycles
+- **Acceptance**: Compilation error diagnostics are identical; no `MemoryStream` allocated per compile call
+
+### Task 10.5: Parallelize `BuildTargetProjects`
+
+- [x] Replaced the sequential `foreach` in `BuildTargetProjects()` with `Parallel.ForEach` over project directories
+- [x] Failure tracking uses `int failedBuild` with `Interlocked.Exchange` and `Volatile.Read` for thread-safe early-exit signalling
+- [x] Each parallel slot checks `failedBuild` before starting its build to skip redundant work once a failure is detected
+- **Acceptance**: Repos with multiple changed projects across separate `.csproj` files build their projects concurrently; pre-stage build time scales with the slowest single project rather than the sum

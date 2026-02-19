@@ -20,6 +20,23 @@ public class TestExecutor(JiTTestConfig config)
     /// <summary>Directories to skip when shadow-copying a project.</summary>
     private static readonly string[] s_skipDirs = ["bin", "obj", ".git", ".vs", "node_modules"];
 
+    /// <summary>
+    /// Cached result of <see cref="RoslynCompiler.DiscoverGlobalUsings"/> so that the
+    /// repo filesystem is scanned at most once per <see cref="TestExecutor"/> lifetime,
+    /// even under high parallelism.
+    /// </summary>
+    private readonly Lazy<string[]> _cachedGlobalUsings =
+        new(() => RoslynCompiler.DiscoverGlobalUsings(null, config.RepositoryRoot),
+            isThreadSafe: true);
+
+    /// <summary>
+    /// Path to the pre-restored template test project's <c>obj/</c> directory.
+    /// Populated by <see cref="PreRestoreTemplateAsync"/> before Stage 5.
+    /// When set, both dotnet-test runs use <c>--no-restore</c>, eliminating per-mutant
+    /// NuGet restore overhead.
+    /// </summary>
+    private string? _preRestoredObjDir;
+
     public async Task<ExecutionResult> ExecuteAsync(GeneratedTest test)
     {
         var result = new ExecutionResult { GeneratedTest = test };
@@ -46,7 +63,8 @@ public class TestExecutor(JiTTestConfig config)
                 $"TestLines={test.TestCode.Split('\n').Length}");
 
             // Step 1: Run test against ORIGINAL code → must PASS
-            var (exitCode1, output1) = await RunDotnetTest(testProjectDir);
+            // Skip NuGet restore when a pre-restored obj/ has been stamped in.
+            var (exitCode1, output1) = await RunDotnetTest(testProjectDir, skipRestore: _preRestoredObjDir is not null);
             result.OriginalOutput = output1;
             result.PassesOnOriginal = exitCode1 == 0;
 
@@ -184,9 +202,86 @@ public class TestExecutor(JiTTestConfig config)
         File.WriteAllText(Path.Combine(testProjectDir, "JiTTest.Temp.csproj"), csproj);
         File.WriteAllText(Path.Combine(testProjectDir, "CatchingTest.cs"), testCode);
 
+        // Copy the pre-restored obj/ so dotnet test can skip NuGet restore.
+        if (_preRestoredObjDir is not null && Directory.Exists(_preRestoredObjDir))
+            CopyDirectoryAll(_preRestoredObjDir, Path.Combine(testProjectDir, "obj"));
+
         // Write project-specific global usings so dotnet test sees the same namespaces
         // as the Roslyn in-memory compilation check.
         WriteProjectGlobalUsings(testProjectDir);
+    }
+
+    /// <summary>
+    /// Creates a template test project with the same NuGet packages as every transient test project
+    /// and runs <c>dotnet restore</c> on it exactly once. The resulting <c>obj/</c> directory is
+    /// stamped into every subsequent per-mutant test project so that both <c>dotnet test</c> runs
+    /// can use <c>--no-restore</c>, saving 3–10 s per mutant.
+    /// Must be called before any <see cref="ExecuteAsync"/> calls.
+    /// </summary>
+    public async Task PreRestoreTemplateAsync()
+    {
+        var templateDir = Path.Combine(config.RepositoryRoot, config.TempDirectory, "_template", "test");
+        try
+        {
+            Directory.CreateDirectory(templateDir);
+
+            // Same NuGet packages as the transient test project; same project file name so that
+            // the generated JiTTest.Temp.csproj.nuget.g.props/targets filenames match exactly.
+            var csproj = """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup>
+                    <TargetFramework>net10.0</TargetFramework>
+                    <ImplicitUsings>enable</ImplicitUsings>
+                    <Nullable>enable</Nullable>
+                  </PropertyGroup>
+                  <ItemGroup>
+                    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.0" />
+                    <PackageReference Include="xunit" Version="2.9.3" />
+                    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.0" />
+                    <PackageReference Include="NSubstitute" Version="5.3.0" />
+                  </ItemGroup>
+                </Project>
+                """;
+
+            File.WriteAllText(Path.Combine(templateDir, "JiTTest.Temp.csproj"), csproj);
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = "dotnet",
+                Arguments = "restore",
+                WorkingDirectory = templateDir,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            using var process = new Process { StartInfo = psi };
+            process.Start();
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+
+            var completed = await Task.Run(() => process.WaitForExit(60_000));
+            if (completed && process.ExitCode == 0)
+            {
+                var objDir = Path.Combine(templateDir, "obj");
+                if (Directory.Exists(objDir))
+                {
+                    _preRestoredObjDir = objDir;
+                    VerboseLog(ConsoleColor.DarkGray,
+                        "[Exec] Template project pre-restored — both dotnet test runs will use --no-restore");
+                }
+            }
+            else
+            {
+                VerboseLog(ConsoleColor.Yellow,
+                    "[Exec] Template pre-restore failed — first dotnet test run will restore normally");
+            }
+        }
+        catch (Exception ex)
+        {
+            VerboseLog(ConsoleColor.Yellow, $"[Exec] Template pre-restore exception: {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -198,7 +293,7 @@ public class TestExecutor(JiTTestConfig config)
     {
         try
         {
-            var discovered = RoslynCompiler.DiscoverGlobalUsings(null, config.RepositoryRoot);
+            var discovered = _cachedGlobalUsings.Value;
 
             // SDK implicit usings are already handled by <ImplicitUsings>enable</ImplicitUsings>
             // so we only need to write any project-specific additions on top.
@@ -291,6 +386,18 @@ public class TestExecutor(JiTTestConfig config)
         catch { /* best effort */ }
 
         return null;
+    }
+
+    /// <summary>
+    /// Plain recursive directory copy with no exclusions — used for copying pre-restored obj/ contents.
+    /// </summary>
+    private static void CopyDirectoryAll(string sourceDir, string destDir)
+    {
+        Directory.CreateDirectory(destDir);
+        foreach (var file in Directory.GetFiles(sourceDir))
+            File.Copy(file, Path.Combine(destDir, Path.GetFileName(file)), overwrite: true);
+        foreach (var dir in Directory.GetDirectories(sourceDir))
+            CopyDirectoryAll(dir, Path.Combine(destDir, Path.GetFileName(dir)));
     }
 
     /// <summary>

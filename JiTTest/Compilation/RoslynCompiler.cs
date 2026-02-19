@@ -286,15 +286,15 @@ public class RoslynCompiler
             references: _references,
             options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
-        using var ms = new MemoryStream();
-        var result = compilation.Emit(ms);
-
-        if (result.Success) return (true, []);
-
-        var errors = result.Diagnostics
+        // Use GetDiagnostics() instead of Emit() — we only need error info, not the assembly bytes.
+        // This avoids allocating the full IL stream on every compile attempt (including retries).
+        var allDiagnostics = compilation.GetDiagnostics();
+        var errors = allDiagnostics
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .Select(d => $"{d.Id}: {d.GetMessage()} (Line {d.Location.GetLineSpan().StartLinePosition.Line + 1})")
             .ToArray();
+
+        if (errors.Length == 0) return (true, []);
 
         return (false, errors);
     }
