@@ -176,7 +176,8 @@ public static class PromptTemplates
                 ═══ DAPR ACTORS — SPECIAL RULES ═══
                 - Dapr Actor classes inherit from 'Actor' base class
                 - ActorStateManager is INTERNAL — you CANNOT instantiate or mock it directly
-                - ActorHost is an internal implementation detail — do NOT use it in tests  - To test Actor methods that use state:
+                - ActorHost is an internal implementation detail — do NOT use it in tests
+                - To test Actor methods that use state:
                   1. Create a mock IActorStateManager using NSubstitute.For<IActorStateManager>()
                   2. Mock the state operations (.GetStateAsync, .SetStateAsync, .GetOrAddStateAsync)
                   3. Pass the mock to the Actor constructor if it accepts one, OR
@@ -227,7 +228,7 @@ public static class PromptTemplates
                   var forecast = new WeatherForecast();
                   forecast.TemperatureC = 25;
                   int expected = 32 + (int)(25 / 0.5556);  // replicate the formula from TemperatureF
-                  Assert.Equal(expected, forecast.TemperatureC);
+                  Assert.Equal(expected, forecast.TemperatureF);
                 
                 This way the test always matches the original code and only breaks when
                 the formula is mutated. NEVER hardcode a precomputed number like 77 — always
