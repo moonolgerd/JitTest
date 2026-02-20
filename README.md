@@ -1,5 +1,6 @@
 # JitTest — Catching Test Generator
 
+[![CI](https://github.com/moonolgerd/JitTest/actions/workflows/ci.yml/badge.svg)](https://github.com/moonolgerd/JitTest/actions/workflows/ci.yml)
 [![NuGet Version](https://img.shields.io/nuget/v/JitTest.svg)](https://www.nuget.org/packages/JitTest/)
 [![NuGet Downloads](https://img.shields.io/nuget/dt/JitTest.svg)](https://www.nuget.org/packages/JitTest/)
 
