@@ -1,0 +1,43 @@
+name: Publish to NuGet
+
+on:
+  push:
+    branches:
+      - 'release/**'
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'
+        dotnet-quality: 'preview'
+    
+    - name: Restore dependencies
+      run: dotnet restore JiTTest/JiTTest.csproj
+    
+    - name: Build
+      run: dotnet build JiTTest/JiTTest.csproj --no-restore --configuration Release
+    
+    - name: Pack
+      run: dotnet pack JiTTest/JiTTest.csproj --no-build --configuration Release --output ./artifacts
+    
+    - name: Publish to NuGet
+      run: dotnet nuget push ./artifacts/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+      env:
+        NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+    
+    - name: Upload package artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: jittest-nuget-package
+        path: ./artifacts/*.nupkg
